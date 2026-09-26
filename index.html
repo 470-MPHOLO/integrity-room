@@ -157,6 +157,13 @@ let timerTick = null;
 let syncTick = null;
 let lastBeepSecond = -1;
 let lastRunningState = false;
+let clockOffsetMs = 0; // this device's clock minus the server's clock, in ms
+
+// "True" server-corrected time. This is what fixes a persistent gap BETWEEN
+// devices (different phones/laptops rarely agree on the exact time down to
+// the second) — separate from the earlier stutter fix, which was about one
+// device's own display being jerky.
+function nowSynced() { return Date.now() + clockOffsetMs; }
 
 function parseTimestamp(ts) {
   if (!ts) return NaN;
@@ -276,22 +283,87 @@ function applyState() {
   document.getElementById('liveInstructions').textContent = gameState.instructions || '';
 }
 
+let realtimeChannel = null;
+const SLOW_POLL_MS = 5000; // fallback cadence once Realtime is confirmed connected
+const FAST_POLL_MS = 500;  // fallback cadence if Realtime is unavailable (e.g. websockets blocked by network)
+
+function setSyncInterval(ms) {
+  if (syncTick) clearInterval(syncTick);
+  syncTick = setInterval(syncFromServer, ms);
+}
+
 function startLocalTick() {
   if (timerTick) clearInterval(timerTick);
   timerTick = setInterval(renderTimerFromState, 250);
 
-  if (syncTick) clearInterval(syncTick);
   syncFromServer();
-  syncTick = setInterval(syncFromServer, 1000);
+  setSyncInterval(SLOW_POLL_MS); // polling is now just a fallback + clock-offset refresh; Realtime is the fast path
+
+  if (realtimeChannel) {
+    try { sb.removeChannel(realtimeChannel); } catch (e) {}
+  }
+
+  realtimeChannel = sb
+    .channel('game-state-stream')
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'game_state' }, (payload) => {
+      const incoming = payload.new;
+      if (!incoming) return;
+      if (incoming.timer_running && !lastRunningState) {
+        lastBeepSecond = -1;
+      }
+      lastRunningState = incoming.timer_running;
+      gameState = incoming;
+      applyState();
+      setStatus(true);
+    })
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        console.log('[IntegrityRoom] Realtime connected');
+        setStatus(true);
+        setSyncInterval(SLOW_POLL_MS);
+      }
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        console.warn('[IntegrityRoom] Realtime issue:', status);
+        setStatus(false, 'realtime: ' + status);
+        // Realtime isn't getting through (locked-down wifi, proxy, etc.) — fall
+        // back to fast polling automatically so devices still stay in sync.
+        setSyncInterval(FAST_POLL_MS);
+      }
+    });
 }
 
 async function syncFromServer() {
   try {
-    const { data, error } = await sb.from('game_state').select('*').eq('id', 1).maybeSingle();
-    if (error) {
-      setStatus(false, 'sync failed: ' + error.message);
+    // Raw fetch instead of the supabase-js client, purely so we can read the
+    // response's standard HTTP "Date" header. Every HTTP server sends this
+    // for free — it tells us what time the SERVER thinks it is right now,
+    // which we compare against our own clock to work out this device's
+    // clock offset. No schema or backend changes required.
+    const t0 = Date.now();
+    const res = await fetch(
+      SUPABASE_URL + '/rest/v1/game_state?id=eq.1&select=*',
+      { headers: { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + SUPABASE_ANON_KEY } }
+    );
+    const t1 = Date.now();
+
+    if (!res.ok) {
+      setStatus(false, 'sync failed: HTTP ' + res.status);
       return;
     }
+
+    const dateHeader = res.headers.get('date');
+    if (dateHeader) {
+      const serverTime = new Date(dateHeader).getTime();
+      // Assume the request and response each took half the round trip, so
+      // the server's clock reading corresponds to roughly the midpoint of
+      // our own local timeline.
+      const localMidpoint = t0 + (t1 - t0) / 2;
+      if (!isNaN(serverTime)) clockOffsetMs = serverTime - localMidpoint;
+    }
+
+    const arr = await res.json();
+    const data = Array.isArray(arr) && arr.length ? arr[0] : null;
+
     if (data) {
       if (data.timer_running && !lastRunningState) {
         lastBeepSecond = -1;
@@ -314,7 +386,7 @@ function renderTimerFromState() {
       showDebug('Invalid timer_started_at: ' + gameState.timer_started_at);
       return;
     }
-    const now = Date.now();
+    const now = nowSynced();
     const elapsed = Math.floor((now - startedAt) / 1000);
     const remaining = Math.max(0, (gameState.timer_seconds || 0) - elapsed);
     localSeconds = remaining;
@@ -443,7 +515,7 @@ async function pushTimerStart() {
   if (!canControl()) return;
   const mins = parseInt(document.getElementById('minutesInput').value) || 3;
   const secs = mins * 60;
-  const now = new Date().toISOString();
+  const now = new Date(nowSynced()).toISOString();
   const { data, error } = await sb.from('game_state').update({
     timer_seconds: secs,
     timer_running: true,
