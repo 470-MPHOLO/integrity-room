@@ -6,19 +6,6 @@
 <title>The Integrity Room | Live</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <link rel="stylesheet" href="style.css">
-<style>
-  .debug-banner {
-    margin-top: 0.75rem;
-    padding: 0.6rem 0.85rem;
-    border-radius: 8px;
-    background: rgba(255, 193, 7, 0.15);
-    border: 1px solid rgba(255, 193, 7, 0.5);
-    color: #b45309;
-    font-size: 0.85rem;
-    line-height: 1.4;
-  }
-  .debug-banner.hidden { display: none; }
-</style>
 </head>
 <body>
 
@@ -51,7 +38,7 @@
     </header>
 
     <div class="card live-card">
-      <h2>🔴 Live Now</h2>
+      <h2>Live Now</h2>
       <div class="live-timer-row">
         <div id="liveTimerDisplay" class="live-timer">03:00</div>
         <div class="live-info">
@@ -59,9 +46,30 @@
           <div class="live-status" id="liveStatus">Ready</div>
         </div>
       </div>
-      <div class="live-dilemma" id="liveDilemma">Loading...</div>
+      <div class="live-dilemma" id="liveDilemma"></div>
       <div class="live-instructions" id="liveInstructions"></div>
       <div id="debugBanner" class="debug-banner hidden"></div>
+    </div>
+
+    <div id="teamPanel" class="card hidden">
+      <h2 id="teamPanelTitle">Your Submission</h2>
+      <div id="teamPanelLocked" class="locked-notice hidden">This phase is locked. Your submission is final.</div>
+      <textarea id="submissionInput" placeholder="Type your answer here..." rows="6"></textarea>
+      <div class="action-row">
+        <button class="btn btn-primary btn-sm" id="submitBtn" onclick="submitAnswer()">Submit</button>
+        <span id="submitStatus" class="submit-status"></span>
+      </div>
+      <div id="mySubmissions" class="my-submissions"></div>
+    </div>
+
+    <div id="votePanel" class="card hidden">
+      <h2>The Blame Poll</h2>
+      <p class="vote-hint">Pick one team for each category. You cannot vote for yourself.</p>
+      <div class="vote-grid" id="voteGrid"></div>
+      <div class="action-row">
+        <button class="btn btn-primary btn-sm" onclick="submitVotes()">Submit Votes</button>
+        <span id="voteStatus" class="submit-status"></span>
+      </div>
     </div>
 
     <div id="adminPanel" class="card hidden">
@@ -75,14 +83,14 @@
         <button class="btn btn-ghost btn-sm" onclick="clearPush()">Clear</button>
       </div>
 
-      <h3 style="margin-top:1.25rem;">Create Team</h3>
+      <h3>Manage Teams</h3>
       <div class="admin-row">
         <input type="text" id="newTeamName" placeholder="Team name">
         <input type="text" id="newTeamCode" placeholder="Team code (e.g., CRL-XYZ)">
         <button class="btn btn-primary btn-sm" onclick="createTeam()">Create</button>
       </div>
 
-      <h3 style="margin-top:1.25rem;">Create Facilitator</h3>
+      <h3>Manage Facilitators</h3>
       <div class="admin-row">
         <input type="text" id="newFacCode" placeholder="Facilitator code">
         <input type="text" id="newFacLabel" placeholder="Label">
@@ -91,7 +99,7 @@
 
       <div id="accessList" class="access-list"></div>
 
-      <div class="action-row" style="margin-top:1.25rem;">
+      <div class="action-row">
         <button class="btn btn-danger btn-sm" onclick="resetAllScores()">Reset All Scores</button>
         <button class="btn btn-ghost btn-sm" onclick="loadAccessList()">Refresh Codes</button>
       </div>
@@ -117,6 +125,15 @@
         <button class="btn btn-ghost btn-sm" onclick="pushPhase(5)">5</button>
       </div>
 
+      <div class="control-row">
+        <label>Lock</label>
+        <button class="btn btn-ghost btn-sm" onclick="toggleLock(1)">Phase 1</button>
+        <button class="btn btn-ghost btn-sm" onclick="toggleLock(2)">Phase 2</button>
+        <button class="btn btn-ghost btn-sm" onclick="toggleLock(3)">Phase 3</button>
+        <button class="btn btn-ghost btn-sm" onclick="toggleLock(4)">Phase 4</button>
+        <button class="btn btn-ghost btn-sm" onclick="toggleLock(5)">Phase 5</button>
+      </div>
+
       <div class="status-bar">
         <span class="status-dot" id="statusDot"></span>
         <span id="statusText">Connecting...</span>
@@ -125,14 +142,24 @@
 
     <div class="grid">
       <div class="card">
-        <h2>🎯 Score Controls</h2>
+        <h2>Score Controls</h2>
         <div id="scoreControls"></div>
       </div>
 
       <div class="card">
-        <h2>🏆 Live Leaderboard</h2>
+        <h2>Live Leaderboard</h2>
         <div id="leaderboard"></div>
       </div>
+    </div>
+
+    <div id="submissionsPanel" class="card hidden">
+      <h2>Team Submissions</h2>
+      <div id="submissionsList" class="submissions-list"></div>
+    </div>
+
+    <div id="voteTallyPanel" class="card hidden">
+      <h2>Vote Tally</h2>
+      <div id="voteTally" class="vote-tally"></div>
     </div>
 
     <footer>
@@ -149,20 +176,37 @@ const SUPABASE_URL = 'https://gsxhjaqoplgmbtjzaobv.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdzeGhqYXFvcGxnbWJ0anphb2J2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM2MTE0NzQsImV4cCI6MjA5OTE4NzQ3NH0.9GAtvGdz6VRwaN3fLruWr9PATqwbwdCUZ_ApU8xX850';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-let session = { role: 'viewer', label: null, teamId: null };
+const PHASES = {
+  1: 'Phase 1: Role Assignment',
+  2: 'Phase 2: The Dilemma Deck',
+  3: 'Phase 3: Negotiation',
+  4: 'Phase 4: The Blame Poll',
+  5: 'Phase 5: Final Debrief'
+};
+
+const VOTE_CATEGORIES = [
+  { key: 'most_cooperative', label: 'Most Cooperative' },
+  { key: 'least_cooperative', label: 'Least Cooperative' },
+  { key: 'most_ethical', label: 'Most Ethical' },
+  { key: 'most_strategic', label: 'Most Strategic' }
+];
+
+let session = { role: 'viewer', label: null, teamId: null, teamName: null };
 let teams = [];
 let gameState = null;
+let submissions = [];
+let votes = [];
 let localSeconds = 180;
 let timerTick = null;
 let syncTick = null;
 let lastBeepSecond = -1;
 let lastRunningState = false;
-let clockOffsetMs = 0; // this device's clock minus the server's clock, in ms
+let clockOffsetMs = 0;
+let realtimeChannel = null;
+let submissionsChannel = null;
+let votesChannel = null;
+let currentDilemmaIndex = 0;
 
-// "True" server-corrected time. This is what fixes a persistent gap BETWEEN
-// devices (different phones/laptops rarely agree on the exact time down to
-// the second) — separate from the earlier stutter fix, which was about one
-// device's own display being jerky.
 function nowSynced() { return Date.now() + clockOffsetMs; }
 
 function parseTimestamp(ts) {
@@ -188,7 +232,7 @@ async function attemptLogin() {
 
   const { data: accessData } = await sb.from('game_access').select('*').eq('code_hash', hash).eq('active', true).maybeSingle();
   if (accessData) {
-    session = { role: accessData.role, label: accessData.label, teamId: null };
+    session = { role: accessData.role, label: accessData.label, teamId: null, teamName: null };
     sessionStorage.setItem('ir_session', JSON.stringify(session));
     enterApp();
     return;
@@ -196,7 +240,7 @@ async function attemptLogin() {
 
   const { data: teamData } = await sb.from('game_teams').select('*').eq('team_code', input).eq('active', true).maybeSingle();
   if (teamData) {
-    session = { role: 'team', label: teamData.name, teamId: teamData.id };
+    session = { role: 'team', label: teamData.name, teamId: teamData.id, teamName: teamData.name };
     sessionStorage.setItem('ir_session', JSON.stringify(session));
     enterApp();
     return;
@@ -206,7 +250,7 @@ async function attemptLogin() {
 }
 
 function loginAsViewer() {
-  session = { role: 'viewer', label: 'Viewer', teamId: null };
+  session = { role: 'viewer', label: 'Viewer', teamId: null, teamName: null };
   sessionStorage.setItem('ir_session', JSON.stringify(session));
   enterApp();
 }
@@ -218,6 +262,7 @@ function logout() {
 
 function canControl() { return session.role === 'admin' || session.role === 'facilitator'; }
 function isAdmin() { return session.role === 'admin'; }
+function isTeam() { return session.role === 'team'; }
 
 async function enterApp() {
   document.getElementById('loginScreen').classList.add('hidden');
@@ -229,15 +274,24 @@ async function enterApp() {
 
   if (isAdmin()) {
     document.getElementById('adminPanel').classList.remove('hidden');
+    document.getElementById('submissionsPanel').classList.remove('hidden');
+    document.getElementById('voteTallyPanel').classList.remove('hidden');
     loadAccessList();
+    loadSubmissions();
+    loadVotes();
   }
   if (canControl()) {
     document.getElementById('controlPanel').classList.remove('hidden');
+  }
+  if (isTeam()) {
+    document.getElementById('teamPanel').classList.remove('hidden');
+    loadSubmissions();
   }
 
   await loadTeams();
   await loadState();
   startLocalTick();
+  subscribeAll();
 }
 
 async function loadTeams() {
@@ -247,164 +301,95 @@ async function loadTeams() {
   teams = data || [];
   renderScoreControls();
   renderLeaderboard();
+  renderVoteGrid();
 }
 
 async function loadState() {
   const { data, error } = await sb.from('game_state').select('*').eq('id', 1).maybeSingle();
-
-  if (error) {
-    setStatus(false, 'game_state read failed: ' + error.message);
-    showDebug('Could not read game_state: ' + error.message);
-    return;
-  }
-
-  if (!data) {
-    showDebug('No game_state row found. Please create one in Supabase with id = 1.');
-    return;
-  }
-
+  if (error) { setStatus(false, 'game_state read failed: ' + error.message); return; }
+  if (!data) return;
   gameState = data;
   lastRunningState = data.timer_running;
-  hideDebug();
   applyState();
+  renderTeamPanel();
+  renderVotePanel();
 }
 
 function applyState() {
   if (!gameState) return;
-  const phaseLabels = {
-    1: 'Phase 1: Role Assignment',
-    2: 'Phase 2: The Dilemma Deck',
-    3: 'Phase 3: Negotiation',
-    4: 'Phase 4: The Blame Poll',
-    5: 'Phase 5: Final Debrief'
-  };
-  document.getElementById('livePhase').textContent = phaseLabels[gameState.current_phase] || 'Phase ' + gameState.current_phase;
+  document.getElementById('livePhase').textContent = PHASES[gameState.current_phase] || 'Phase ' + gameState.current_phase;
   document.getElementById('liveDilemma').textContent = gameState.current_dilemma || '';
   document.getElementById('liveInstructions').textContent = gameState.instructions || '';
 }
 
-let realtimeChannel = null;
-const SLOW_POLL_MS = 5000; // fallback cadence once Realtime is confirmed connected
-const FAST_POLL_MS = 500;  // fallback cadence if Realtime is unavailable (e.g. websockets blocked by network)
+function startLocalTick() {
+  if (timerTick) clearInterval(timerTick);
+  timerTick = setInterval(renderTimerFromState, 250);
+  syncFromServer();
+  setSyncInterval(5000);
+}
 
 function setSyncInterval(ms) {
   if (syncTick) clearInterval(syncTick);
   syncTick = setInterval(syncFromServer, ms);
 }
 
-function startLocalTick() {
-  if (timerTick) clearInterval(timerTick);
-  timerTick = setInterval(renderTimerFromState, 250);
-
-  syncFromServer();
-  setSyncInterval(SLOW_POLL_MS); // polling is now just a fallback + clock-offset refresh; Realtime is the fast path
-
-  if (realtimeChannel) {
-    try { sb.removeChannel(realtimeChannel); } catch (e) {}
-  }
-
-  realtimeChannel = sb
-    .channel('game-state-stream')
-    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'game_state' }, (payload) => {
-      const incoming = payload.new;
-      if (!incoming) return;
-      if (incoming.timer_running && !lastRunningState) {
-        lastBeepSecond = -1;
-      }
-      lastRunningState = incoming.timer_running;
-      gameState = incoming;
-      applyState();
-      setStatus(true);
-    })
-    .subscribe((status) => {
-      if (status === 'SUBSCRIBED') {
-        console.log('[IntegrityRoom] Realtime connected');
-        setStatus(true);
-        setSyncInterval(SLOW_POLL_MS);
-      }
-      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-        console.warn('[IntegrityRoom] Realtime issue:', status);
-        setStatus(false, 'realtime: ' + status);
-        // Realtime isn't getting through (locked-down wifi, proxy, etc.) — fall
-        // back to fast polling automatically so devices still stay in sync.
-        setSyncInterval(FAST_POLL_MS);
-      }
-    });
-}
-
 async function syncFromServer() {
   try {
-    // Raw fetch instead of the supabase-js client, purely so we can read the
-    // response's standard HTTP "Date" header. Every HTTP server sends this
-    // for free — it tells us what time the SERVER thinks it is right now,
-    // which we compare against our own clock to work out this device's
-    // clock offset. No schema or backend changes required.
     const t0 = Date.now();
-    const res = await fetch(
-      SUPABASE_URL + '/rest/v1/game_state?id=eq.1&select=*',
-      { headers: { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + SUPABASE_ANON_KEY } }
-    );
+    const res = await fetch(SUPABASE_URL + '/rest/v1/game_state?id=eq.1&select=*', {
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + SUPABASE_ANON_KEY }
+    });
     const t1 = Date.now();
-
-    if (!res.ok) {
-      setStatus(false, 'sync failed: HTTP ' + res.status);
-      return;
-    }
+    if (!res.ok) { setStatus(false, 'sync HTTP ' + res.status); return; }
 
     const dateHeader = res.headers.get('date');
     if (dateHeader) {
       const serverTime = new Date(dateHeader).getTime();
-      // Assume the request and response each took half the round trip, so
-      // the server's clock reading corresponds to roughly the midpoint of
-      // our own local timeline.
-      const localMidpoint = t0 + (t1 - t0) / 2;
-      if (!isNaN(serverTime)) clockOffsetMs = serverTime - localMidpoint;
+      const localMid = t0 + (t1 - t0) / 2;
+      if (!isNaN(serverTime)) clockOffsetMs = serverTime - localMid;
     }
 
     const arr = await res.json();
     const data = Array.isArray(arr) && arr.length ? arr[0] : null;
-
     if (data) {
-      if (data.timer_running && !lastRunningState) {
-        lastBeepSecond = -1;
-      }
+      if (data.timer_running && !lastRunningState) lastBeepSecond = -1;
       lastRunningState = data.timer_running;
+      const phaseChanged = !gameState || gameState.current_phase !== data.current_phase;
       gameState = data;
       setStatus(true);
-      hideDebug();
       applyState();
+      if (phaseChanged) {
+        renderTeamPanel();
+        renderVotePanel();
+      }
+      updateLockUI();
     }
   } catch (e) {
-    setStatus(false, 'network error: ' + e.message);
+    setStatus(false, 'network: ' + e.message);
   }
 }
 
 function renderTimerFromState() {
   if (gameState && gameState.timer_running && gameState.timer_started_at) {
     const startedAt = parseTimestamp(gameState.timer_started_at);
-    if (isNaN(startedAt)) {
-      showDebug('Invalid timer_started_at: ' + gameState.timer_started_at);
+    if (!isNaN(startedAt)) {
+      const elapsed = Math.floor((nowSynced() - startedAt) / 1000);
+      const remaining = Math.max(0, (gameState.timer_seconds || 0) - elapsed);
+      localSeconds = remaining;
+      updateLiveTimer();
+      if (remaining === 0) {
+        document.getElementById('liveStatus').textContent = 'Time Up';
+        if (lastBeepSecond !== 0) { lastBeepSecond = 0; playBeep(); }
+      } else {
+        document.getElementById('liveStatus').textContent = 'Running';
+      }
       return;
     }
-    const now = nowSynced();
-    const elapsed = Math.floor((now - startedAt) / 1000);
-    const remaining = Math.max(0, (gameState.timer_seconds || 0) - elapsed);
-    localSeconds = remaining;
-    updateLiveTimer();
-    if (remaining === 0) {
-      document.getElementById('liveStatus').textContent = 'Time Up';
-      if (lastBeepSecond !== 0) {
-        lastBeepSecond = 0;
-        playBeep();
-      }
-    } else {
-      document.getElementById('liveStatus').textContent = 'Running';
-    }
-  } else {
-    localSeconds = gameState && gameState.timer_seconds ? gameState.timer_seconds : 180;
-    updateLiveTimer();
-    document.getElementById('liveStatus').textContent = 'Paused';
   }
+  localSeconds = gameState && gameState.timer_seconds ? gameState.timer_seconds : 180;
+  updateLiveTimer();
+  document.getElementById('liveStatus').textContent = 'Paused';
 }
 
 function updateLiveTimer() {
@@ -441,19 +426,202 @@ function setStatus(ok, detail) {
   if (!ok && detail) console.error('[IntegrityRoom]', detail);
 }
 
-function showDebug(msg) {
-  const el = document.getElementById('debugBanner');
-  if (!el) return;
-  if (!canControl()) { console.warn('[IntegrityRoom]', msg); return; }
-  el.textContent = '⚠ ' + msg;
-  el.classList.remove('hidden');
+function updateLockUI() {
+  const locked = gameState && Array.isArray(gameState.locked_phases) ? gameState.locked_phases : [];
+  const phase = gameState ? gameState.current_phase : 1;
+  const isLocked = locked.includes(phase);
+  const lockedNotice = document.getElementById('teamPanelLocked');
+  const submitBtn = document.getElementById('submitBtn');
+  const input = document.getElementById('submissionInput');
+  if (isLocked) {
+    lockedNotice.classList.remove('hidden');
+    submitBtn.disabled = true;
+    input.disabled = true;
+  } else {
+    lockedNotice.classList.add('hidden');
+    submitBtn.disabled = false;
+    input.disabled = false;
+  }
 }
 
-function hideDebug() {
-  const el = document.getElementById('debugBanner');
-  if (!el) return;
-  el.classList.add('hidden');
-  el.textContent = '';
+function renderTeamPanel() {
+  if (!isTeam()) return;
+  const phase = gameState ? gameState.current_phase : 1;
+  const title = document.getElementById('teamPanelTitle');
+  if (phase === 1) title.textContent = 'Your Strategy';
+  else if (phase === 2) title.textContent = 'Your Answer to Dilemma ' + (currentDilemmaIndex + 1);
+  else if (phase === 3) title.textContent = 'Your Negotiation Proposal';
+  else if (phase === 4) title.textContent = 'Voting';
+  else title.textContent = 'Your Final Reflection';
+
+  const sub = submissions.find(s => s.team_id === session.teamId && s.phase === phase && s.dilemma_index === currentDilemmaIndex);
+  document.getElementById('submissionInput').value = sub ? sub.answer : '';
+  updateLockUI();
+}
+
+function renderVotePanel() {
+  const panel = document.getElementById('votePanel');
+  if (!gameState || gameState.current_phase !== 4) {
+    panel.classList.add('hidden');
+    return;
+  }
+  if (!isTeam()) { panel.classList.add('hidden'); return; }
+  panel.classList.remove('hidden');
+  renderVoteGrid();
+}
+
+function renderVoteGrid() {
+  const grid = document.getElementById('voteGrid');
+  if (!grid || !isTeam()) return;
+  const otherTeams = teams.filter(t => t.id !== session.teamId);
+  const myVotes = votes.filter(v => v.voter_team_id === session.teamId);
+  const voteMap = {};
+  myVotes.forEach(v => { voteMap[v.category] = v.target_team_id; });
+
+  grid.innerHTML = VOTE_CATEGORIES.map(cat => {
+    const options = otherTeams.map(t => `<option value="${t.id}" ${voteMap[cat.key] === t.id ? 'selected' : ''}>${t.name}</option>`).join('');
+    return `
+      <div class="vote-field">
+        <label>${cat.label}</label>
+        <select id="vote_${cat.key}">
+          <option value="">-- pick a team --</option>
+          ${options}
+        </select>
+      </div>
+    `;
+  }).join('');
+}
+
+async function submitVotes() {
+  if (!isTeam()) return;
+  const status = document.getElementById('voteStatus');
+  const payload = [];
+  for (const cat of VOTE_CATEGORIES) {
+    const val = document.getElementById('vote_' + cat.key).value;
+    if (!val) { status.textContent = 'Please complete all categories.'; status.className = 'submit-status error'; return; }
+    payload.push({ voter_team_id: session.teamId, target_team_id: parseInt(val), category: cat.key });
+  }
+  const { error } = await sb.from('game_votes').upsert(payload, { onConflict: 'voter_team_id,category' });
+  if (error) { status.textContent = 'Error: ' + error.message; status.className = 'submit-status error'; return; }
+  status.textContent = 'Votes submitted.'; status.className = 'submit-status success';
+  loadVotes();
+}
+
+async function submitAnswer() {
+  if (!isTeam()) return;
+  const input = document.getElementById('submissionInput');
+  const status = document.getElementById('submitStatus');
+  const answer = input.value.trim();
+  if (!answer) { status.textContent = 'Answer cannot be empty.'; status.className = 'submit-status error'; return; }
+  if (answer.length > 2000) { status.textContent = 'Answer too long (max 2000 chars).'; status.className = 'submit-status error'; return; }
+
+  const phase = gameState ? gameState.current_phase : 1;
+  const dilemmaIndex = phase === 2 ? currentDilemmaIndex : 0;
+
+  const { error } = await sb.from('game_submissions').upsert([{
+    team_id: session.teamId,
+    phase: phase,
+    dilemma_index: dilemmaIndex,
+    answer: answer,
+    updated_at: new Date().toISOString()
+  }], { onConflict: 'team_id,phase,dilemma_index' });
+
+  if (error) { status.textContent = 'Error: ' + error.message; status.className = 'submit-status error'; return; }
+  status.textContent = 'Submitted.'; status.className = 'submit-status success';
+  loadSubmissions();
+}
+
+async function loadSubmissions() {
+  const { data, error } = await sb.from('game_submissions').select('*').order('created_at', { ascending: true });
+  if (error) return;
+  submissions = data || [];
+  renderMySubmissions();
+  if (isAdmin()) renderSubmissionsList();
+  renderTeamPanel();
+}
+
+async function loadVotes() {
+  const { data } = await sb.from('game_votes').select('*');
+  votes = data || [];
+  if (isAdmin()) renderVoteTally();
+  renderVoteGrid();
+}
+
+function renderMySubmissions() {
+  const container = document.getElementById('mySubmissions');
+  if (!container || !isTeam()) return;
+  const mine = submissions.filter(s => s.team_id === session.teamId);
+  if (!mine.length) { container.innerHTML = ''; return; }
+  container.innerHTML = '<h3>Your Submissions</h3>' + mine.map(s => `
+    <div class="my-submission">
+      <div class="my-submission__meta">Phase ${s.phase}${s.dilemma_index > 0 ? ' - Dilemma ' + (s.dilemma_index + 1) : ''} - ${new Date(s.created_at).toLocaleTimeString()}</div>
+      <div class="my-submission__text">${escapeHtml(s.answer)}</div>
+    </div>
+  `).join('');
+}
+
+function renderSubmissionsList() {
+  const container = document.getElementById('submissionsList');
+  if (!container) return;
+  if (!submissions.length) { container.innerHTML = '<p class="empty">No submissions yet.</p>'; return; }
+  const grouped = {};
+  submissions.forEach(s => {
+    const key = 'Phase ' + s.phase + (s.dilemma_index > 0 ? ' - Dilemma ' + (s.dilemma_index + 1) : '');
+    if (!grouped[key]) grouped[key] = [];
+    grouped[key].push(s);
+  });
+  container.innerHTML = Object.keys(grouped).sort().map(key => `
+    <div class="sub-group">
+      <h3>${key}</h3>
+      ${grouped[key].map(s => {
+        const team = teams.find(t => t.id === s.team_id);
+        return `
+          <div class="sub-entry">
+            <div class="sub-entry__head">
+              <span class="sub-entry__team">${team ? team.name : 'Unknown'}</span>
+              <span class="sub-entry__time">${new Date(s.created_at).toLocaleTimeString()}</span>
+            </div>
+            <div class="sub-entry__text">${escapeHtml(s.answer)}</div>
+            <div class="sub-entry__actions">
+              <button class="btn btn-success btn-sm" onclick="awardPoints(${s.team_id}, 10)">+10</button>
+              <button class="btn btn-ghost btn-sm" onclick="awardPoints(${s.team_id}, 5)">+5</button>
+              <button class="btn btn-ghost btn-sm" onclick="awardPoints(${s.team_id}, 3)">+3</button>
+              <button class="btn btn-danger btn-sm" onclick="awardPoints(${s.team_id}, -5)">-5</button>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `).join('');
+}
+
+function renderVoteTally() {
+  const container = document.getElementById('voteTally');
+  if (!container) return;
+  if (!votes.length) { container.innerHTML = '<p class="empty">No votes yet.</p>'; return; }
+  container.innerHTML = VOTE_CATEGORIES.map(cat => {
+    const catVotes = votes.filter(v => v.category === cat.key);
+    const counts = {};
+    catVotes.forEach(v => { counts[v.target_team_id] = (counts[v.target_team_id] || 0) + 1; });
+    const rows = Object.keys(counts).map(tid => {
+      const team = teams.find(t => t.id === parseInt(tid));
+      return `<div class="tally-row"><span>${team ? team.name : 'Unknown'}</span><span class="tally-count">${counts[tid]}</span></div>`;
+    }).join('');
+    return `<div class="tally-group"><h3>${cat.label}</h3>${rows || '<p class="empty">No votes</p>'}</div>`;
+  }).join('');
+}
+
+async function awardPoints(teamId, delta) {
+  if (!canControl()) return;
+  const team = teams.find(t => t.id === teamId);
+  if (!team) return;
+  const newScore = team.score + delta;
+  await sb.from('game_teams').update({ score: newScore, updated_at: new Date().toISOString() }).eq('id', teamId);
+  await sb.from('game_scores').insert([{ team_id: teamId, delta: delta, reason: 'Awarded from submission' }]);
+  team.score = newScore;
+  renderScoreControls();
+  renderLeaderboard();
+  showToast((delta > 0 ? '+' : '') + delta + ' to ' + team.name);
 }
 
 function renderScoreControls() {
@@ -485,7 +653,7 @@ function renderLeaderboard() {
   if (!teams.length) { container.innerHTML = '<p class="empty">No teams yet.</p>'; return; }
   const sorted = [...teams].sort((a, b) => b.score - a.score);
   container.innerHTML = sorted.map((t, i) => {
-    const medals = ['🥇', '🥈', '🥉'];
+    const medals = ['1st', '2nd', '3rd'];
     const badge = medals[i] || ('#' + (i + 1));
     const isMyTeam = session.teamId === t.id;
     return `
@@ -522,9 +690,7 @@ async function pushTimerStart() {
     timer_started_at: now,
     updated_at: now
   }).eq('id', 1).select().single();
-
   if (error) { showToast('Error: ' + error.message); return; }
-
   gameState = data;
   lastRunningState = true;
   lastBeepSecond = -1;
@@ -569,16 +735,33 @@ async function pushTimerReset() {
   lastBeepSecond = -1;
   updateLiveTimer();
   document.getElementById('liveStatus').textContent = 'Paused';
-  showToast('Timer reset to ' + mins + ' min');
+  showToast('Timer reset');
 }
 
 async function pushPhase(n) {
   if (!canControl()) return;
+  if (n === 2) currentDilemmaIndex = 0;
   const { data, error } = await sb.from('game_state').update({ current_phase: n, updated_at: new Date().toISOString() }).eq('id', 1).select().single();
   if (error) { showToast('Error: ' + error.message); return; }
   gameState = data;
   applyState();
+  renderTeamPanel();
+  renderVotePanel();
+  updateLockUI();
   showToast('Phase ' + n);
+}
+
+async function toggleLock(phase) {
+  if (!isAdmin()) return;
+  const locked = gameState && Array.isArray(gameState.locked_phases) ? [...gameState.locked_phases] : [];
+  const idx = locked.indexOf(phase);
+  if (idx >= 0) locked.splice(idx, 1);
+  else locked.push(phase);
+  const { data, error } = await sb.from('game_state').update({ locked_phases: locked, updated_at: new Date().toISOString() }).eq('id', 1).select().single();
+  if (error) { showToast('Error: ' + error.message); return; }
+  gameState = data;
+  updateLockUI();
+  showToast('Phase ' + phase + (idx >= 0 ? ' unlocked' : ' locked'));
 }
 
 async function pushContent() {
@@ -673,6 +856,40 @@ async function deleteAccess(id) {
   loadAccessList();
 }
 
+function subscribeAll() {
+  if (realtimeChannel) try { sb.removeChannel(realtimeChannel); } catch(e){}
+  realtimeChannel = sb.channel('irs-state')
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'game_state' }, (payload) => {
+      const incoming = payload.new;
+      if (!incoming) return;
+      if (incoming.timer_running && !lastRunningState) lastBeepSecond = -1;
+      lastRunningState = incoming.timer_running;
+      const phaseChanged = !gameState || gameState.current_phase !== incoming.current_phase;
+      gameState = incoming;
+      applyState();
+      if (phaseChanged) { renderTeamPanel(); renderVotePanel(); }
+      updateLockUI();
+    })
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') { console.log('[IR] Realtime connected'); setStatus(true); setSyncInterval(5000); }
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') { setSyncInterval(500); }
+    });
+
+  if (submissionsChannel) try { sb.removeChannel(submissionsChannel); } catch(e){}
+  submissionsChannel = sb.channel('irs-subs')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'game_submissions' }, () => { loadSubmissions(); })
+    .subscribe();
+
+  if (votesChannel) try { sb.removeChannel(votesChannel); } catch(e){}
+  votesChannel = sb.channel('irs-votes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'game_votes' }, () => { loadVotes(); })
+    .subscribe();
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
 function showToast(msg) {
   const t = document.getElementById('toast');
   t.textContent = msg;
@@ -681,15 +898,10 @@ function showToast(msg) {
   t._timeout = setTimeout(() => t.classList.remove('show'), 2500);
 }
 
-document.getElementById('codeInput').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') attemptLogin();
-});
+document.getElementById('codeInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') attemptLogin(); });
 
 const saved = sessionStorage.getItem('ir_session');
-if (saved) {
-  session = JSON.parse(saved);
-  enterApp();
-}
+if (saved) { session = JSON.parse(saved); enterApp(); }
 </script>
 </body>
 </html>
