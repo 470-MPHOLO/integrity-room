@@ -89,7 +89,6 @@
       <div class="control-row">
         <label>Timer</label>
         <input type="number" id="minutesInput" value="3" min="1" max="99">
-        <button class="btn btn-primary btn-sm" onclick="pushTimerSet()">Set</button>
         <button class="btn btn-success btn-sm" onclick="pushTimerStart()">Start</button>
         <button class="btn btn-warning btn-sm" onclick="pushTimerPause()">Pause</button>
         <button class="btn btn-danger btn-sm" onclick="pushTimerReset()">Reset</button>
@@ -239,19 +238,6 @@ function applyState() {
   document.getElementById('livePhase').textContent = phaseLabels[gameState.current_phase] || 'Phase ' + gameState.current_phase;
   document.getElementById('liveDilemma').textContent = gameState.current_dilemma || '';
   document.getElementById('liveInstructions').textContent = gameState.instructions || '';
-
-  if (gameState.timer_running && gameState.timer_started_at) {
-    const startedAt = new Date(gameState.timer_started_at).getTime();
-    const now = Date.now();
-    const elapsed = Math.floor((now - startedAt) / 1000);
-    localSeconds = Math.max(0, (gameState.timer_seconds || 0) - elapsed);
-    document.getElementById('liveStatus').textContent = 'Running';
-  } else {
-    localSeconds = gameState.timer_seconds || 180;
-    document.getElementById('liveStatus').textContent = 'Paused';
-  }
-
-  updateLiveTimer();
 }
 
 function startLocalTick() {
@@ -264,13 +250,19 @@ function startLocalTick() {
       const remaining = Math.max(0, (gameState.timer_seconds || 0) - elapsed);
       localSeconds = remaining;
       updateLiveTimer();
-      if (remaining === 0 && lastBeepSecond !== 0) {
-        lastBeepSecond = 0;
-        playBeep();
+      if (remaining === 0) {
         document.getElementById('liveStatus').textContent = 'Time Up';
+        if (lastBeepSecond !== 0) {
+          lastBeepSecond = 0;
+          playBeep();
+        }
+      } else {
+        document.getElementById('liveStatus').textContent = 'Running';
       }
     } else {
+      localSeconds = gameState && gameState.timer_seconds ? gameState.timer_seconds : 180;
       updateLiveTimer();
+      document.getElementById('liveStatus').textContent = 'Paused';
     }
   }, 1000);
 }
@@ -286,8 +278,6 @@ function updateLiveTimer() {
 }
 
 function playBeep() {
-  if (lastBeepSecond === localSeconds) return;
-  lastBeepSecond = localSeconds;
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
     const osc = ctx.createOscillator();
@@ -327,7 +317,7 @@ function renderScoreControls() {
           <button class="btn btn-success" ${disabled} onclick="changeScore(${t.id}, 10)">+10</button>
         </div>
         <div class="team-score">${t.score}</div>
-        ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteTeam(${t.id})">×</button>` : ''}
+        ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteTeam(${t.id})">x</button>` : ''}
       </div>
     `;
   }).join('');
@@ -365,34 +355,17 @@ async function changeScore(teamId, delta) {
   showToast((delta > 0 ? '+' : '') + delta + ' to ' + team.name);
 }
 
-async function pushTimerSet() {
+async function pushTimerStart() {
   if (!canControl()) return;
   const mins = parseInt(document.getElementById('minutesInput').value) || 3;
   const secs = mins * 60;
-  await sb.from('game_state').update({
-    timer_seconds: secs,
-    timer_running: false,
-    timer_started_at: null,
-    updated_at: new Date().toISOString()
-  }).eq('id', 1);
-  showToast('Timer set to ' + mins + ' min');
-}
-
-async function pushTimerStart() {
-  if (!canControl()) return;
-  const currentSeconds = gameState && gameState.timer_seconds ? gameState.timer_seconds : 0;
-  let secs = currentSeconds;
-  if (!secs || secs <= 0) {
-    const mins = parseInt(document.getElementById('minutesInput').value) || 3;
-    secs = mins * 60;
-  }
   await sb.from('game_state').update({
     timer_seconds: secs,
     timer_running: true,
     timer_started_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
   }).eq('id', 1);
-  showToast('Timer started');
+  showToast('Timer started (' + mins + ' min)');
 }
 
 async function pushTimerPause() {
@@ -419,7 +392,7 @@ async function pushTimerReset() {
     timer_seconds: mins * 60,
     updated_at: new Date().toISOString()
   }).eq('id', 1);
-  showToast('Timer reset');
+  showToast('Timer reset to ' + mins + ' min');
 }
 
 async function pushPhase(n) {
