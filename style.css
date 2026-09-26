@@ -212,3 +212,51 @@ footer .brand { color: #a5b4fc; font-weight: 700; margin-bottom: 0.3rem; text-tr
 
 .toast { position: fixed; top: 1.5rem; right: 1.5rem; background: #1e293b; border-left: 4px solid #10b981; padding: 0.75rem 1.25rem; border-radius: 8px; color: #f1f5f9; font-size: 0.85rem; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4); opacity: 0; transform: translateX(120%); transition: all 0.3s; z-index: 9999; }
 .toast.show { opacity: 1; transform: translateX(0); }
+
+
+.role-brief-card {
+  background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%);
+  border: 1px solid #4f46e5;
+}
+
+.role-brief-text {
+  color: #e0e7ff;
+  font-size: 0.95rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.role-brief-row {
+  background: #0f172a;
+  border-radius: 10px;
+  padding: 1rem;
+  margin-bottom: 0.75rem;
+  border: 1px solid #334155;
+}
+
+.role-brief-label {
+  font-size: 0.75rem;
+  color: #a5b4fc;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+}
+
+.role-brief-row textarea {
+  width: 100%;
+  padding: 0.65rem 0.85rem;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  color: #e2e8f0;
+  font-size: 0.9rem;
+  font-family: inherit;
+  resize: vertical;
+  margin-bottom: 0.5rem;
+}
+
+.role-brief-row textarea:focus {
+  outline: none;
+  border-color: #4f46e5;
+}
