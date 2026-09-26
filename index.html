@@ -6,6 +6,21 @@
 <title>The Integrity Room | Live</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <link rel="stylesheet" href="style.css">
+<style>
+  .live-dilemma-index {
+    font-size: 0.85rem;
+    opacity: 0.75;
+    margin-top: 0.15rem;
+  }
+  .live-dilemma-index.hidden { display: none; }
+  .dilemma-index-display {
+    display: inline-block;
+    min-width: 1.5em;
+    text-align: center;
+    font-weight: 600;
+    padding: 0 0.4em;
+  }
+</style>
 </head>
 <body>
 
@@ -43,6 +58,7 @@
         <div id="liveTimerDisplay" class="live-timer">03:00</div>
         <div class="live-info">
           <div class="live-phase" id="livePhase">Phase 1: Role Assignment</div>
+          <div class="live-dilemma-index hidden" id="liveDilemmaIndex"></div>
           <div class="live-status" id="liveStatus">Ready</div>
         </div>
       </div>
@@ -126,6 +142,13 @@
       </div>
 
       <div class="control-row">
+        <label>Dilemma</label>
+        <button class="btn btn-ghost btn-sm" onclick="pushDilemmaIndex(-1)">&larr; Prev</button>
+        <span id="dilemmaIndexDisplay" class="dilemma-index-display">1</span>
+        <button class="btn btn-ghost btn-sm" onclick="pushDilemmaIndex(1)">Next &rarr;</button>
+      </div>
+
+      <div class="control-row">
         <label>Lock</label>
         <button class="btn btn-ghost btn-sm" onclick="toggleLock(1)">Phase 1</button>
         <button class="btn btn-ghost btn-sm" onclick="toggleLock(2)">Phase 2</button>
@@ -205,9 +228,16 @@ let clockOffsetMs = 0;
 let realtimeChannel = null;
 let submissionsChannel = null;
 let votesChannel = null;
-let currentDilemmaIndex = 0;
 
 function nowSynced() { return Date.now() + clockOffsetMs; }
+
+// Dilemma index now lives in game_state (current_dilemma_index) so every
+// device agrees on it, the same way phase and timer already do. Falls back
+// to 0 if the column doesn't exist yet in Supabase, so this is safe to
+// deploy even before the migration below has been run.
+function getDilemmaIndex() {
+  return (gameState && typeof gameState.current_dilemma_index === 'number') ? gameState.current_dilemma_index : 0;
+}
 
 function parseTimestamp(ts) {
   if (!ts) return NaN;
@@ -320,6 +350,19 @@ function applyState() {
   document.getElementById('livePhase').textContent = PHASES[gameState.current_phase] || 'Phase ' + gameState.current_phase;
   document.getElementById('liveDilemma').textContent = gameState.current_dilemma || '';
   document.getElementById('liveInstructions').textContent = gameState.instructions || '';
+
+  const idxEl = document.getElementById('liveDilemmaIndex');
+  const dilemmaDisplayEl = document.getElementById('dilemmaIndexDisplay');
+  const idx = getDilemmaIndex();
+  if (idxEl) {
+    if (gameState.current_phase === 2) {
+      idxEl.textContent = 'Dilemma ' + (idx + 1);
+      idxEl.classList.remove('hidden');
+    } else {
+      idxEl.classList.add('hidden');
+    }
+  }
+  if (dilemmaDisplayEl) dilemmaDisplayEl.textContent = (idx + 1);
 }
 
 function startLocalTick() {
@@ -356,10 +399,11 @@ async function syncFromServer() {
       if (data.timer_running && !lastRunningState) lastBeepSecond = -1;
       lastRunningState = data.timer_running;
       const phaseChanged = !gameState || gameState.current_phase !== data.current_phase;
+      const dilemmaChanged = !gameState || gameState.current_dilemma_index !== data.current_dilemma_index;
       gameState = data;
       setStatus(true);
       applyState();
-      if (phaseChanged) {
+      if (phaseChanged || dilemmaChanged) {
         renderTeamPanel();
         renderVotePanel();
       }
@@ -448,13 +492,14 @@ function renderTeamPanel() {
   if (!isTeam()) return;
   const phase = gameState ? gameState.current_phase : 1;
   const title = document.getElementById('teamPanelTitle');
+  const dilemmaIdx = getDilemmaIndex();
   if (phase === 1) title.textContent = 'Your Strategy';
-  else if (phase === 2) title.textContent = 'Your Answer to Dilemma ' + (currentDilemmaIndex + 1);
+  else if (phase === 2) title.textContent = 'Your Answer to Dilemma ' + (dilemmaIdx + 1);
   else if (phase === 3) title.textContent = 'Your Negotiation Proposal';
   else if (phase === 4) title.textContent = 'Voting';
   else title.textContent = 'Your Final Reflection';
 
-  const sub = submissions.find(s => s.team_id === session.teamId && s.phase === phase && s.dilemma_index === currentDilemmaIndex);
+  const sub = submissions.find(s => s.team_id === session.teamId && s.phase === phase && s.dilemma_index === dilemmaIdx);
   document.getElementById('submissionInput').value = sub ? sub.answer : '';
   updateLockUI();
 }
@@ -516,7 +561,7 @@ async function submitAnswer() {
   if (answer.length > 2000) { status.textContent = 'Answer too long (max 2000 chars).'; status.className = 'submit-status error'; return; }
 
   const phase = gameState ? gameState.current_phase : 1;
-  const dilemmaIndex = phase === 2 ? currentDilemmaIndex : 0;
+  const dilemmaIndex = phase === 2 ? getDilemmaIndex() : 0;
 
   const { error } = await sb.from('game_submissions').upsert([{
     team_id: session.teamId,
@@ -740,8 +785,9 @@ async function pushTimerReset() {
 
 async function pushPhase(n) {
   if (!canControl()) return;
-  if (n === 2) currentDilemmaIndex = 0;
-  const { data, error } = await sb.from('game_state').update({ current_phase: n, updated_at: new Date().toISOString() }).eq('id', 1).select().single();
+  const updates = { current_phase: n, updated_at: new Date().toISOString() };
+  if (n === 2) updates.current_dilemma_index = 0; // reset for everyone, not just this device
+  const { data, error } = await sb.from('game_state').update(updates).eq('id', 1).select().single();
   if (error) { showToast('Error: ' + error.message); return; }
   gameState = data;
   applyState();
@@ -749,6 +795,20 @@ async function pushPhase(n) {
   renderVotePanel();
   updateLockUI();
   showToast('Phase ' + n);
+}
+
+async function pushDilemmaIndex(delta) {
+  if (!canControl()) return;
+  const next = Math.max(0, getDilemmaIndex() + delta);
+  const { data, error } = await sb.from('game_state').update({
+    current_dilemma_index: next,
+    updated_at: new Date().toISOString()
+  }).eq('id', 1).select().single();
+  if (error) { showToast('Error: ' + error.message); return; }
+  gameState = data;
+  applyState();
+  renderTeamPanel();
+  showToast('Dilemma ' + (next + 1));
 }
 
 async function toggleLock(phase) {
@@ -865,9 +925,10 @@ function subscribeAll() {
       if (incoming.timer_running && !lastRunningState) lastBeepSecond = -1;
       lastRunningState = incoming.timer_running;
       const phaseChanged = !gameState || gameState.current_phase !== incoming.current_phase;
+      const dilemmaChanged = !gameState || gameState.current_dilemma_index !== incoming.current_dilemma_index;
       gameState = incoming;
       applyState();
-      if (phaseChanged) { renderTeamPanel(); renderVotePanel(); }
+      if (phaseChanged || dilemmaChanged) { renderTeamPanel(); renderVotePanel(); }
       updateLockUI();
     })
     .subscribe((status) => {
