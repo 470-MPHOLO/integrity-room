@@ -187,12 +187,12 @@ function logout() {
 function canControl() { return session.role === 'admin' || session.role === 'facilitator'; }
 function isAdmin() { return session.role === 'admin'; }
 
-function enterApp() {
+async function enterApp() {
   document.getElementById('loginScreen').classList.add('hidden');
   document.getElementById('mainApp').classList.remove('hidden');
 
   const badge = document.getElementById('roleBadge');
-  badge.textContent = session.role.charAt(0).toUpperCase() + session.role.slice(1) + (session.label && session.role !== 'viewer' ? ' — ' + session.label : '');
+  badge.textContent = session.role.charAt(0).toUpperCase() + session.role.slice(1) + (session.label && session.role !== 'viewer' ? ' - ' + session.label : '');
   badge.className = 'role-badge role-' + session.role;
 
   if (isAdmin()) {
@@ -203,8 +203,8 @@ function enterApp() {
     document.getElementById('controlPanel').classList.remove('hidden');
   }
 
-  loadTeams();
-  loadState();
+  await loadTeams();
+  await loadState();
   subscribeRealtime();
   startLocalTick();
 }
@@ -244,10 +244,10 @@ function applyState() {
     const startedAt = new Date(gameState.timer_started_at).getTime();
     const now = Date.now();
     const elapsed = Math.floor((now - startedAt) / 1000);
-    localSeconds = Math.max(0, gameState.timer_seconds - elapsed);
+    localSeconds = Math.max(0, (gameState.timer_seconds || 0) - elapsed);
     document.getElementById('liveStatus').textContent = 'Running';
   } else {
-    localSeconds = gameState.timer_seconds || 0;
+    localSeconds = gameState.timer_seconds || 180;
     document.getElementById('liveStatus').textContent = 'Paused';
   }
 
@@ -357,7 +357,7 @@ async function changeScore(teamId, delta) {
   team.score = newScore;
   renderScoreControls();
   renderLeaderboard();
-  showToast((delta > 0 ? '+' : '') + delta + ' → ' + team.name);
+  showToast((delta > 0 ? '+' : '') + delta + ' to ' + team.name);
 }
 
 async function pushTimerSet() {
@@ -375,7 +375,14 @@ async function pushTimerSet() {
 
 async function pushTimerStart() {
   if (!canControl()) return;
+  const currentSeconds = gameState && gameState.timer_seconds ? gameState.timer_seconds : 0;
+  let secs = currentSeconds;
+  if (!secs || secs <= 0) {
+    const mins = parseInt(document.getElementById('minutesInput').value) || 3;
+    secs = mins * 60;
+  }
   await sb.from('game_state').update({
+    timer_seconds: secs,
     timer_running: true,
     timer_started_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
@@ -385,7 +392,10 @@ async function pushTimerStart() {
 
 async function pushTimerPause() {
   if (!canControl()) return;
-  const remaining = localSeconds;
+  let remaining = localSeconds;
+  if (!remaining || remaining <= 0) {
+    remaining = gameState && gameState.timer_seconds ? gameState.timer_seconds : 180;
+  }
   await sb.from('game_state').update({
     timer_running: false,
     timer_seconds: remaining,
@@ -467,7 +477,7 @@ async function createFacilitator() {
   const label = document.getElementById('newFacLabel').value.trim() || 'Facilitator';
   if (!code) { showToast('Code required'); return; }
   const hash = await sha256(code);
-  const { error } = await sb.from('game_access').insert([{ role: 'facilitator', code_hash: hash, label, active: true }]);
+  const { error } = await sb.from('game_access').insert([{ role: 'facilitator', code_hash: hash, label: label, active: true }]);
   if (error) { showToast('Error: ' + error.message); return; }
   document.getElementById('newFacCode').value = '';
   document.getElementById('newFacLabel').value = '';
