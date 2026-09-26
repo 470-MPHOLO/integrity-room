@@ -257,10 +257,15 @@ function applyState() {
 function startLocalTick() {
   if (timerTick) clearInterval(timerTick);
   timerTick = setInterval(() => {
-    if (gameState && gameState.timer_running && localSeconds > 0) {
-      localSeconds--;
+    if (gameState && gameState.timer_running && gameState.timer_started_at) {
+      const startedAt = new Date(gameState.timer_started_at).getTime();
+      const now = Date.now();
+      const elapsed = Math.floor((now - startedAt) / 1000);
+      const remaining = Math.max(0, (gameState.timer_seconds || 0) - elapsed);
+      localSeconds = remaining;
       updateLiveTimer();
-      if (localSeconds === 0) {
+      if (remaining === 0 && lastBeepSecond !== 0) {
+        lastBeepSecond = 0;
         playBeep();
         document.getElementById('liveStatus').textContent = 'Time Up';
       }
