@@ -155,24 +155,15 @@ let gameState = null;
 let localSeconds = 180;
 let timerTick = null;
 let lastBeepSecond = -1;
-let clockOffset = 0;
-let lastClockSync = 0;
 
-function serverNow() {
-  return Date.now() + clockOffset;
-}
-
-async function syncClock() {
-  try {
-    const { data, error } = await sb.rpc('get_server_time');
-    if (error) throw error;
-    if (data) {
-      clockOffset = new Date(data).getTime() - Date.now();
-      lastClockSync = Date.now();
-    }
-  } catch (e) {
-    console.warn('[IntegrityRoom] clock sync failed', e);
+function parseTimestamp(ts) {
+  if (!ts) return NaN;
+  if (typeof ts === 'string' && !ts.endsWith('Z') && !ts.includes('+')) {
+    const lastMinus = ts.lastIndexOf('-');
+    const hasDateMinus = lastMinus > 8;
+    if (!hasDateMinus) return new Date(ts + 'Z').getTime();
   }
+  return new Date(ts).getTime();
 }
 
 async function sha256(text) {
@@ -235,7 +226,6 @@ async function enterApp() {
     document.getElementById('controlPanel').classList.remove('hidden');
   }
 
-  await syncClock();
   await loadTeams();
   await loadState();
   startLocalTick();
@@ -255,32 +245,12 @@ async function loadState() {
 
   if (error) {
     setStatus(false, 'game_state read failed: ' + error.message);
-    showDebug('Could not read game_state: ' + error.message + '. This is usually a missing Row Level Security SELECT policy on the game_state table.');
+    showDebug('Could not read game_state: ' + error.message);
     return;
   }
 
   if (!data) {
-    showDebug('No game_state row found (id = 1). Attempting to create a default one...');
-    const { data: created, error: insertError } = await sb.from('game_state').insert([{
-      id: 1,
-      current_phase: 1,
-      current_dilemma: null,
-      instructions: null,
-      timer_seconds: 180,
-      timer_running: false,
-      timer_started_at: null,
-      updated_at: new Date().toISOString()
-    }]).select().maybeSingle();
-
-    if (insertError) {
-      setStatus(false, 'game_state row missing and could not be created: ' + insertError.message);
-      showDebug('game_state row (id = 1) does not exist, and creating it failed: ' + insertError.message + '. Create that row manually in the Supabase table editor, or add an anon INSERT policy on game_state.');
-      return;
-    }
-
-    gameState = created;
-    hideDebug();
-    applyState();
+    showDebug('No game_state row found. Please create one in Supabase with id = 1.');
     return;
   }
 
@@ -306,35 +276,25 @@ function applyState() {
 function startLocalTick() {
   if (timerTick) clearInterval(timerTick);
   timerTick = setInterval(async () => {
-    if (Date.now() - lastClockSync > 30000) {
-      await syncClock();
-    }
-
     try {
       const { data, error } = await sb.from('game_state').select('*').eq('id', 1).maybeSingle();
       if (error) {
         setStatus(false, 'timer refresh failed: ' + error.message);
-        showDebug('Timer isn\'t updating because the per-second read of game_state is failing: ' + error.message);
-        return;
-      }
-      if (data) {
+      } else if (data) {
         gameState = data;
         setStatus(true);
         hideDebug();
-      } else if (!gameState) {
-        showDebug('No game_state row (id = 1) exists yet.');
       }
     } catch (e) {
       setStatus(false, 'network error: ' + e.message);
-      showDebug('Timer isn\'t updating: ' + e.message);
     }
 
     if (gameState && gameState.timer_running && gameState.timer_started_at) {
-      const startedAt = new Date(gameState.timer_started_at).getTime();
+      const startedAt = parseTimestamp(gameState.timer_started_at);
       if (isNaN(startedAt)) {
-        showDebug('timer_started_at is not a valid timestamp: "' + gameState.timer_started_at + '". Press Reset then Start again.');
+        showDebug('Invalid timer_started_at: ' + gameState.timer_started_at);
       } else {
-        const now = serverNow();
+        const now = Date.now();
         const elapsed = Math.floor((now - startedAt) / 1000);
         const remaining = Math.max(0, (gameState.timer_seconds || 0) - elapsed);
         localSeconds = remaining;
@@ -465,16 +425,19 @@ async function changeScore(teamId, delta) {
 async function pushTimerStart() {
   if (!canControl()) return;
   const mins = parseInt(document.getElementById('minutesInput').value) || 3;
-  const { data, error } = await sb.rpc('start_game_timer', { mins: mins });
+  const secs = mins * 60;
+  const now = new Date().toISOString();
+  const { data, error } = await sb.from('game_state').update({
+    timer_seconds: secs,
+    timer_running: true,
+    timer_started_at: now,
+    updated_at: now
+  }).eq('id', 1).select().single();
 
-  if (error) {
-    showToast('Error starting timer: ' + error.message);
-    console.error('[IntegrityRoom]', error);
-    return;
-  }
+  if (error) { showToast('Error: ' + error.message); return; }
 
   gameState = data;
-  localSeconds = mins * 60;
+  localSeconds = secs;
   lastBeepSecond = -1;
   updateLiveTimer();
   document.getElementById('liveStatus').textContent = 'Running';
@@ -493,9 +456,9 @@ async function pushTimerPause() {
     timer_started_at: null,
     updated_at: new Date().toISOString()
   }).eq('id', 1).select().single();
-  if (error) { showToast('Error pausing timer: ' + error.message); return; }
+  if (error) { showToast('Error: ' + error.message); return; }
   gameState = data;
-  showToast('Timer paused at ' + Math.floor(remaining / 60) + ':' + (remaining % 60).toString().padStart(2, '0'));
+  showToast('Timer paused');
 }
 
 async function pushTimerReset() {
@@ -508,7 +471,7 @@ async function pushTimerReset() {
     timer_seconds: secs,
     updated_at: new Date().toISOString()
   }).eq('id', 1).select().single();
-  if (error) { showToast('Error resetting timer: ' + error.message); return; }
+  if (error) { showToast('Error: ' + error.message); return; }
   gameState = data;
   localSeconds = secs;
   lastBeepSecond = -1;
