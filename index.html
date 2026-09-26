@@ -204,7 +204,6 @@ async function enterApp() {
 
   await loadTeams();
   await loadState();
-  subscribeRealtime();
   startLocalTick();
 }
 
@@ -226,7 +225,6 @@ async function loadState() {
 
 function applyState() {
   if (!gameState) return;
-
   const phaseLabels = {
     1: 'Phase 1: Role Assignment',
     2: 'Phase 2: The Dilemma Deck',
@@ -234,7 +232,6 @@ function applyState() {
     4: 'Phase 4: The Blame Poll',
     5: 'Phase 5: Final Debrief'
   };
-
   document.getElementById('livePhase').textContent = phaseLabels[gameState.current_phase] || 'Phase ' + gameState.current_phase;
   document.getElementById('liveDilemma').textContent = gameState.current_dilemma || '';
   document.getElementById('liveInstructions').textContent = gameState.instructions || '';
@@ -242,7 +239,12 @@ function applyState() {
 
 function startLocalTick() {
   if (timerTick) clearInterval(timerTick);
-  timerTick = setInterval(() => {
+  timerTick = setInterval(async () => {
+    try {
+      const { data } = await sb.from('game_state').select('*').eq('id', 1).single();
+      if (data) gameState = data;
+    } catch (e) {}
+
     if (gameState && gameState.timer_running && gameState.timer_started_at) {
       const startedAt = new Date(gameState.timer_started_at).getTime();
       const now = Date.now();
@@ -264,6 +266,7 @@ function startLocalTick() {
       updateLiveTimer();
       document.getElementById('liveStatus').textContent = 'Paused';
     }
+    applyState();
   }, 1000);
 }
 
@@ -359,12 +362,18 @@ async function pushTimerStart() {
   if (!canControl()) return;
   const mins = parseInt(document.getElementById('minutesInput').value) || 3;
   const secs = mins * 60;
+  const now = new Date().toISOString();
   await sb.from('game_state').update({
     timer_seconds: secs,
     timer_running: true,
-    timer_started_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
+    timer_started_at: now,
+    updated_at: now
   }).eq('id', 1);
+  gameState = { ...gameState, timer_seconds: secs, timer_running: true, timer_started_at: now };
+  localSeconds = secs;
+  lastBeepSecond = -1;
+  updateLiveTimer();
+  document.getElementById('liveStatus').textContent = 'Running';
   showToast('Timer started (' + mins + ' min)');
 }
 
@@ -380,24 +389,33 @@ async function pushTimerPause() {
     timer_started_at: null,
     updated_at: new Date().toISOString()
   }).eq('id', 1);
-  showToast('Timer paused');
+  gameState = { ...gameState, timer_running: false, timer_seconds: remaining, timer_started_at: null };
+  showToast('Timer paused at ' + Math.floor(remaining / 60) + ':' + (remaining % 60).toString().padStart(2, '0'));
 }
 
 async function pushTimerReset() {
   if (!canControl()) return;
   const mins = parseInt(document.getElementById('minutesInput').value) || 3;
+  const secs = mins * 60;
   await sb.from('game_state').update({
     timer_running: false,
     timer_started_at: null,
-    timer_seconds: mins * 60,
+    timer_seconds: secs,
     updated_at: new Date().toISOString()
   }).eq('id', 1);
+  gameState = { ...gameState, timer_running: false, timer_started_at: null, timer_seconds: secs };
+  localSeconds = secs;
+  lastBeepSecond = -1;
+  updateLiveTimer();
+  document.getElementById('liveStatus').textContent = 'Paused';
   showToast('Timer reset to ' + mins + ' min');
 }
 
 async function pushPhase(n) {
   if (!canControl()) return;
   await sb.from('game_state').update({ current_phase: n, updated_at: new Date().toISOString() }).eq('id', 1);
+  gameState = { ...gameState, current_phase: n };
+  applyState();
   showToast('Phase ' + n);
 }
 
@@ -410,6 +428,8 @@ async function pushContent() {
     instructions: instructions || null,
     updated_at: new Date().toISOString()
   }).eq('id', 1);
+  gameState = { ...gameState, current_dilemma: dilemma || null, instructions: instructions || null };
+  applyState();
   showToast('Live content pushed');
 }
 
@@ -488,21 +508,6 @@ async function deleteAccess(id) {
   if (!confirm('Delete this access code?')) return;
   await sb.from('game_access').delete().eq('id', id);
   loadAccessList();
-}
-
-function subscribeRealtime() {
-  sb.channel('game-state')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'game_state' }, (payload) => {
-      gameState = payload.new;
-      applyState();
-    })
-    .subscribe();
-
-  sb.channel('game-teams')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'game_teams' }, () => {
-      loadTeams();
-    })
-    .subscribe();
 }
 
 function showToast(msg) {
