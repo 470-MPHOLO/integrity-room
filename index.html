@@ -6,6 +6,19 @@
 <title>The Integrity Room | Live</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <link rel="stylesheet" href="style.css">
+<style>
+  .debug-banner {
+    margin-top: 0.75rem;
+    padding: 0.6rem 0.85rem;
+    border-radius: 8px;
+    background: rgba(255, 193, 7, 0.15);
+    border: 1px solid rgba(255, 193, 7, 0.5);
+    color: #b45309;
+    font-size: 0.85rem;
+    line-height: 1.4;
+  }
+  .debug-banner.hidden { display: none; }
+</style>
 </head>
 <body>
 
@@ -48,6 +61,7 @@
       </div>
       <div class="live-dilemma" id="liveDilemma">Loading...</div>
       <div class="live-instructions" id="liveInstructions"></div>
+      <div id="debugBanner" class="debug-banner hidden"></div>
     </div>
 
     <div id="adminPanel" class="card hidden">
@@ -141,6 +155,25 @@ let gameState = null;
 let localSeconds = 180;
 let timerTick = null;
 let lastBeepSecond = -1;
+let clockOffset = 0;
+let lastClockSync = 0;
+
+function serverNow() {
+  return Date.now() + clockOffset;
+}
+
+async function syncClock() {
+  try {
+    const { data, error } = await sb.rpc('get_server_time');
+    if (error) throw error;
+    if (data) {
+      clockOffset = new Date(data).getTime() - Date.now();
+      lastClockSync = Date.now();
+    }
+  } catch (e) {
+    console.warn('[IntegrityRoom] clock sync failed', e);
+  }
+}
 
 async function sha256(text) {
   const buf = new TextEncoder().encode(text);
@@ -202,6 +235,7 @@ async function enterApp() {
     document.getElementById('controlPanel').classList.remove('hidden');
   }
 
+  await syncClock();
   await loadTeams();
   await loadState();
   startLocalTick();
@@ -209,7 +243,7 @@ async function enterApp() {
 
 async function loadTeams() {
   const { data, error } = await sb.from('game_teams').select('*').eq('active', true).order('score', { ascending: false });
-  if (error) { setStatus(false); return; }
+  if (error) { setStatus(false, 'game_teams: ' + error.message); return; }
   setStatus(true);
   teams = data || [];
   renderScoreControls();
@@ -217,9 +251,41 @@ async function loadTeams() {
 }
 
 async function loadState() {
-  const { data, error } = await sb.from('game_state').select('*').eq('id', 1).single();
-  if (error) return;
+  const { data, error } = await sb.from('game_state').select('*').eq('id', 1).maybeSingle();
+
+  if (error) {
+    setStatus(false, 'game_state read failed: ' + error.message);
+    showDebug('Could not read game_state: ' + error.message + '. This is usually a missing Row Level Security SELECT policy on the game_state table.');
+    return;
+  }
+
+  if (!data) {
+    showDebug('No game_state row found (id = 1). Attempting to create a default one...');
+    const { data: created, error: insertError } = await sb.from('game_state').insert([{
+      id: 1,
+      current_phase: 1,
+      current_dilemma: null,
+      instructions: null,
+      timer_seconds: 180,
+      timer_running: false,
+      timer_started_at: null,
+      updated_at: new Date().toISOString()
+    }]).select().maybeSingle();
+
+    if (insertError) {
+      setStatus(false, 'game_state row missing and could not be created: ' + insertError.message);
+      showDebug('game_state row (id = 1) does not exist, and creating it failed: ' + insertError.message + '. Create that row manually in the Supabase table editor, or add an anon INSERT policy on game_state.');
+      return;
+    }
+
+    gameState = created;
+    hideDebug();
+    applyState();
+    return;
+  }
+
   gameState = data;
+  hideDebug();
   applyState();
 }
 
@@ -240,26 +306,48 @@ function applyState() {
 function startLocalTick() {
   if (timerTick) clearInterval(timerTick);
   timerTick = setInterval(async () => {
+    if (Date.now() - lastClockSync > 30000) {
+      await syncClock();
+    }
+
     try {
-      const { data } = await sb.from('game_state').select('*').eq('id', 1).single();
-      if (data) gameState = data;
-    } catch (e) {}
+      const { data, error } = await sb.from('game_state').select('*').eq('id', 1).maybeSingle();
+      if (error) {
+        setStatus(false, 'timer refresh failed: ' + error.message);
+        showDebug('Timer isn\'t updating because the per-second read of game_state is failing: ' + error.message);
+        return;
+      }
+      if (data) {
+        gameState = data;
+        setStatus(true);
+        hideDebug();
+      } else if (!gameState) {
+        showDebug('No game_state row (id = 1) exists yet.');
+      }
+    } catch (e) {
+      setStatus(false, 'network error: ' + e.message);
+      showDebug('Timer isn\'t updating: ' + e.message);
+    }
 
     if (gameState && gameState.timer_running && gameState.timer_started_at) {
       const startedAt = new Date(gameState.timer_started_at).getTime();
-      const now = Date.now();
-      const elapsed = Math.floor((now - startedAt) / 1000);
-      const remaining = Math.max(0, (gameState.timer_seconds || 0) - elapsed);
-      localSeconds = remaining;
-      updateLiveTimer();
-      if (remaining === 0) {
-        document.getElementById('liveStatus').textContent = 'Time Up';
-        if (lastBeepSecond !== 0) {
-          lastBeepSecond = 0;
-          playBeep();
-        }
+      if (isNaN(startedAt)) {
+        showDebug('timer_started_at is not a valid timestamp: "' + gameState.timer_started_at + '". Press Reset then Start again.');
       } else {
-        document.getElementById('liveStatus').textContent = 'Running';
+        const now = serverNow();
+        const elapsed = Math.floor((now - startedAt) / 1000);
+        const remaining = Math.max(0, (gameState.timer_seconds || 0) - elapsed);
+        localSeconds = remaining;
+        updateLiveTimer();
+        if (remaining === 0) {
+          document.getElementById('liveStatus').textContent = 'Time Up';
+          if (lastBeepSecond !== 0) {
+            lastBeepSecond = 0;
+            playBeep();
+          }
+        } else {
+          document.getElementById('liveStatus').textContent = 'Running';
+        }
       }
     } else {
       localSeconds = gameState && gameState.timer_seconds ? gameState.timer_seconds : 180;
@@ -295,12 +383,28 @@ function playBeep() {
   } catch (e) {}
 }
 
-function setStatus(ok) {
+function setStatus(ok, detail) {
   const dot = document.getElementById('statusDot');
   const text = document.getElementById('statusText');
   if (!dot || !text) return;
   dot.classList.toggle('error', !ok);
   text.textContent = ok ? 'Connected' : 'Disconnected';
+  if (!ok && detail) console.error('[IntegrityRoom]', detail);
+}
+
+function showDebug(msg) {
+  const el = document.getElementById('debugBanner');
+  if (!el) return;
+  if (!canControl()) { console.warn('[IntegrityRoom]', msg); return; }
+  el.textContent = '⚠ ' + msg;
+  el.classList.remove('hidden');
+}
+
+function hideDebug() {
+  const el = document.getElementById('debugBanner');
+  if (!el) return;
+  el.classList.add('hidden');
+  el.textContent = '';
 }
 
 function renderScoreControls() {
@@ -361,16 +465,16 @@ async function changeScore(teamId, delta) {
 async function pushTimerStart() {
   if (!canControl()) return;
   const mins = parseInt(document.getElementById('minutesInput').value) || 3;
-  const secs = mins * 60;
-  const now = new Date().toISOString();
-  await sb.from('game_state').update({
-    timer_seconds: secs,
-    timer_running: true,
-    timer_started_at: now,
-    updated_at: now
-  }).eq('id', 1);
-  gameState = { ...gameState, timer_seconds: secs, timer_running: true, timer_started_at: now };
-  localSeconds = secs;
+  const { data, error } = await sb.rpc('start_game_timer', { mins: mins });
+
+  if (error) {
+    showToast('Error starting timer: ' + error.message);
+    console.error('[IntegrityRoom]', error);
+    return;
+  }
+
+  gameState = data;
+  localSeconds = mins * 60;
   lastBeepSecond = -1;
   updateLiveTimer();
   document.getElementById('liveStatus').textContent = 'Running';
@@ -383,13 +487,14 @@ async function pushTimerPause() {
   if (!remaining || remaining <= 0) {
     remaining = gameState && gameState.timer_seconds ? gameState.timer_seconds : 180;
   }
-  await sb.from('game_state').update({
+  const { data, error } = await sb.from('game_state').update({
     timer_running: false,
     timer_seconds: remaining,
     timer_started_at: null,
     updated_at: new Date().toISOString()
-  }).eq('id', 1);
-  gameState = { ...gameState, timer_running: false, timer_seconds: remaining, timer_started_at: null };
+  }).eq('id', 1).select().single();
+  if (error) { showToast('Error pausing timer: ' + error.message); return; }
+  gameState = data;
   showToast('Timer paused at ' + Math.floor(remaining / 60) + ':' + (remaining % 60).toString().padStart(2, '0'));
 }
 
@@ -397,13 +502,14 @@ async function pushTimerReset() {
   if (!canControl()) return;
   const mins = parseInt(document.getElementById('minutesInput').value) || 3;
   const secs = mins * 60;
-  await sb.from('game_state').update({
+  const { data, error } = await sb.from('game_state').update({
     timer_running: false,
     timer_started_at: null,
     timer_seconds: secs,
     updated_at: new Date().toISOString()
-  }).eq('id', 1);
-  gameState = { ...gameState, timer_running: false, timer_started_at: null, timer_seconds: secs };
+  }).eq('id', 1).select().single();
+  if (error) { showToast('Error resetting timer: ' + error.message); return; }
+  gameState = data;
   localSeconds = secs;
   lastBeepSecond = -1;
   updateLiveTimer();
@@ -413,8 +519,9 @@ async function pushTimerReset() {
 
 async function pushPhase(n) {
   if (!canControl()) return;
-  await sb.from('game_state').update({ current_phase: n, updated_at: new Date().toISOString() }).eq('id', 1);
-  gameState = { ...gameState, current_phase: n };
+  const { data, error } = await sb.from('game_state').update({ current_phase: n, updated_at: new Date().toISOString() }).eq('id', 1).select().single();
+  if (error) { showToast('Error: ' + error.message); return; }
+  gameState = data;
   applyState();
   showToast('Phase ' + n);
 }
@@ -423,12 +530,13 @@ async function pushContent() {
   if (!canControl()) return;
   const dilemma = document.getElementById('pushDilemma').value.trim();
   const instructions = document.getElementById('pushInstructions').value.trim();
-  await sb.from('game_state').update({
+  const { data, error } = await sb.from('game_state').update({
     current_dilemma: dilemma || null,
     instructions: instructions || null,
     updated_at: new Date().toISOString()
-  }).eq('id', 1);
-  gameState = { ...gameState, current_dilemma: dilemma || null, instructions: instructions || null };
+  }).eq('id', 1).select().single();
+  if (error) { showToast('Error: ' + error.message); return; }
+  gameState = data;
   applyState();
   showToast('Live content pushed');
 }
