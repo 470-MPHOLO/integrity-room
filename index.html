@@ -6,21 +6,6 @@
 <title>The Integrity Room | Live</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <link rel="stylesheet" href="style.css">
-<style>
-  .live-dilemma-index {
-    font-size: 0.85rem;
-    opacity: 0.75;
-    margin-top: 0.15rem;
-  }
-  .live-dilemma-index.hidden { display: none; }
-  .dilemma-index-display {
-    display: inline-block;
-    min-width: 1.5em;
-    text-align: center;
-    font-weight: 600;
-    padding: 0 0.4em;
-  }
-</style>
 </head>
 <body>
 
@@ -51,6 +36,11 @@
       </div>
       <div class="brand-line">Cre8Learn Institute &middot; Create. Learn. Innovate.</div>
     </header>
+
+    <div id="roleBriefCard" class="card role-brief-card hidden">
+      <h2>Your Role Brief</h2>
+      <div id="roleBriefText" class="role-brief-text"></div>
+    </div>
 
     <div class="card live-card">
       <h2>Live Now</h2>
@@ -98,6 +88,9 @@
         <button class="btn btn-success btn-sm" onclick="pushContent()">Push Live</button>
         <button class="btn btn-ghost btn-sm" onclick="clearPush()">Clear</button>
       </div>
+
+      <h3>Role Briefs (per team)</h3>
+      <div id="roleBriefAdmin"></div>
 
       <h3>Manage Teams</h3>
       <div class="admin-row">
@@ -226,15 +219,12 @@ let lastBeepSecond = -1;
 let lastRunningState = false;
 let clockOffsetMs = 0;
 let realtimeChannel = null;
+let teamsChannel = null;
 let submissionsChannel = null;
 let votesChannel = null;
 
 function nowSynced() { return Date.now() + clockOffsetMs; }
 
-// Dilemma index now lives in game_state (current_dilemma_index) so every
-// device agrees on it, the same way phase and timer already do. Falls back
-// to 0 if the column doesn't exist yet in Supabase, so this is safe to
-// deploy even before the migration below has been run.
 function getDilemmaIndex() {
   return (gameState && typeof gameState.current_dilemma_index === 'number') ? gameState.current_dilemma_index : 0;
 }
@@ -332,6 +322,8 @@ async function loadTeams() {
   renderScoreControls();
   renderLeaderboard();
   renderVoteGrid();
+  renderRoleBriefCard();
+  if (isAdmin()) renderRoleBriefAdmin();
 }
 
 async function loadState() {
@@ -363,6 +355,43 @@ function applyState() {
     }
   }
   if (dilemmaDisplayEl) dilemmaDisplayEl.textContent = (idx + 1);
+}
+
+function renderRoleBriefCard() {
+  if (!isTeam()) return;
+  const card = document.getElementById('roleBriefCard');
+  const text = document.getElementById('roleBriefText');
+  const me = teams.find(t => t.id === session.teamId);
+  if (me && me.role_brief && me.role_brief.trim()) {
+    text.textContent = me.role_brief;
+    card.classList.remove('hidden');
+  } else {
+    card.classList.add('hidden');
+  }
+}
+
+function renderRoleBriefAdmin() {
+  const container = document.getElementById('roleBriefAdmin');
+  if (!container || !isAdmin()) return;
+  if (!teams.length) { container.innerHTML = '<p class="empty">No teams yet.</p>'; return; }
+  container.innerHTML = teams.map(t => `
+    <div class="role-brief-row">
+      <div class="role-brief-label">${t.name}</div>
+      <textarea id="brief_${t.id}" rows="3" placeholder="Type ${t.name}'s private role brief...">${escapeHtml(t.role_brief || '')}</textarea>
+      <button class="btn btn-primary btn-sm" onclick="pushRoleBrief(${t.id})">Push Brief</button>
+    </div>
+  `).join('');
+}
+
+async function pushRoleBrief(teamId) {
+  if (!isAdmin()) return;
+  const el = document.getElementById('brief_' + teamId);
+  if (!el) return;
+  const brief = el.value.trim();
+  const { error } = await sb.from('game_teams').update({ role_brief: brief || null }).eq('id', teamId);
+  if (error) { showToast('Error: ' + error.message); return; }
+  showToast('Brief pushed');
+  loadTeams();
 }
 
 function startLocalTick() {
@@ -786,7 +815,7 @@ async function pushTimerReset() {
 async function pushPhase(n) {
   if (!canControl()) return;
   const updates = { current_phase: n, updated_at: new Date().toISOString() };
-  if (n === 2) updates.current_dilemma_index = 0; // reset for everyone, not just this device
+  if (n === 2) updates.current_dilemma_index = 0;
   const { data, error } = await sb.from('game_state').update(updates).eq('id', 1).select().single();
   if (error) { showToast('Error: ' + error.message); return; }
   gameState = data;
@@ -935,6 +964,11 @@ function subscribeAll() {
       if (status === 'SUBSCRIBED') { console.log('[IR] Realtime connected'); setStatus(true); setSyncInterval(5000); }
       if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') { setSyncInterval(500); }
     });
+
+  if (teamsChannel) try { sb.removeChannel(teamsChannel); } catch(e){}
+  teamsChannel = sb.channel('irs-teams')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'game_teams' }, () => { loadTeams(); })
+    .subscribe();
 
   if (submissionsChannel) try { sb.removeChannel(submissionsChannel); } catch(e){}
   submissionsChannel = sb.channel('irs-subs')
