@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>The Integrity Room | Live</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="integrity-room.css">
 </head>
 <body>
 
@@ -37,66 +37,76 @@
       <div class="brand-line">Cre8Learn Institute &middot; Create. Learn. Innovate.</div>
     </header>
 
-    <div id="adminPanel" class="card hidden">
-      <h2>Admin Panel</h2>
-      <div class="admin-grid">
-        <div>
-          <h3>Create Team</h3>
-          <input type="text" id="newTeamName" placeholder="Team name">
-          <input type="text" id="newTeamCode" placeholder="Team code (e.g., CRL-XYZ)">
-          <button class="btn btn-primary btn-sm" onclick="createTeam()">Create</button>
-        </div>
-        <div>
-          <h3>Create Facilitator</h3>
-          <input type="text" id="newFacCode" placeholder="Facilitator code">
-          <input type="text" id="newFacLabel" placeholder="Label (e.g., Nthabiseng)">
-          <button class="btn btn-primary btn-sm" onclick="createFacilitator()">Create</button>
+    <div class="card live-card">
+      <h2>🔴 Live Now</h2>
+      <div class="live-timer-row">
+        <div id="liveTimerDisplay" class="live-timer">03:00</div>
+        <div class="live-info">
+          <div class="live-phase" id="livePhase">Phase 1: Role Assignment</div>
+          <div class="live-status" id="liveStatus">Ready</div>
         </div>
       </div>
-      <div id="accessList" class="access-list"></div>
+      <div class="live-dilemma" id="liveDilemma">Loading...</div>
+      <div class="live-instructions" id="liveInstructions"></div>
+    </div>
+
+    <div id="adminPanel" class="card hidden">
+      <h2>Admin Panel</h2>
+
+      <h3>Push Live Content</h3>
+      <textarea id="pushDilemma" placeholder="Current dilemma / scenario" rows="2"></textarea>
+      <textarea id="pushInstructions" placeholder="Instructions for teams" rows="2"></textarea>
       <div class="action-row">
+        <button class="btn btn-success btn-sm" onclick="pushContent()">Push Live</button>
+        <button class="btn btn-ghost btn-sm" onclick="clearPush()">Clear</button>
+      </div>
+
+      <h3 style="margin-top:1.25rem;">Create Team</h3>
+      <div class="admin-row">
+        <input type="text" id="newTeamName" placeholder="Team name">
+        <input type="text" id="newTeamCode" placeholder="Team code (e.g., CRL-XYZ)">
+        <button class="btn btn-primary btn-sm" onclick="createTeam()">Create</button>
+      </div>
+
+      <h3 style="margin-top:1.25rem;">Create Facilitator</h3>
+      <div class="admin-row">
+        <input type="text" id="newFacCode" placeholder="Facilitator code">
+        <input type="text" id="newFacLabel" placeholder="Label">
+        <button class="btn btn-primary btn-sm" onclick="createFacilitator()">Create</button>
+      </div>
+
+      <div id="accessList" class="access-list"></div>
+
+      <div class="action-row" style="margin-top:1.25rem;">
         <button class="btn btn-danger btn-sm" onclick="resetAllScores()">Reset All Scores</button>
-        <button class="btn btn-ghost btn-sm" onclick="loadAll()">Refresh</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadAccessList()">Refresh Codes</button>
       </div>
     </div>
 
-    <div class="grid">
-      <div class="card">
-        <h2>⏱ Timer</h2>
-        <div id="timerDisplay" class="timer-display">03:00</div>
-        <div class="timer-controls">
-          <input type="number" id="minutesInput" value="3" min="1" max="99">
-          <button class="btn btn-primary" onclick="setTimer()">Set</button>
-          <button class="btn btn-success" onclick="startTimer()">Start</button>
-          <button class="btn btn-warning" onclick="pauseTimer()">Pause</button>
-          <button class="btn btn-danger" onclick="resetTimer()">Reset</button>
-        </div>
-        <div class="timer-controls timer-presets">
-          <button class="btn btn-ghost btn-sm" onclick="quickTimer(1)">1 min</button>
-          <button class="btn btn-ghost btn-sm" onclick="quickTimer(2)">2 min</button>
-          <button class="btn btn-ghost btn-sm" onclick="quickTimer(3)">3 min</button>
-          <button class="btn btn-ghost btn-sm" onclick="quickTimer(5)">5 min</button>
-          <button class="btn btn-ghost btn-sm" onclick="quickTimer(10)">10 min</button>
-        </div>
+    <div id="controlPanel" class="card hidden">
+      <h2>Facilitator Controls</h2>
+
+      <div class="control-row">
+        <label>Timer</label>
+        <input type="number" id="minutesInput" value="3" min="1" max="99">
+        <button class="btn btn-primary btn-sm" onclick="pushTimerSet()">Set</button>
+        <button class="btn btn-success btn-sm" onclick="pushTimerStart()">Start</button>
+        <button class="btn btn-warning btn-sm" onclick="pushTimerPause()">Pause</button>
+        <button class="btn btn-danger btn-sm" onclick="pushTimerReset()">Reset</button>
       </div>
 
-      <div class="card">
-        <h2>📋 Current Phase</h2>
-        <div class="phase-display">
-          <div class="label">Now Playing</div>
-          <div class="value" id="phaseValue">Phase 1: Role Assignment</div>
-        </div>
-        <div class="phase-controls">
-          <button class="btn btn-ghost btn-sm" onclick="setPhase(1)">Phase 1</button>
-          <button class="btn btn-ghost btn-sm" onclick="setPhase(2)">Phase 2</button>
-          <button class="btn btn-ghost btn-sm" onclick="setPhase(3)">Phase 3</button>
-          <button class="btn btn-ghost btn-sm" onclick="setPhase(4)">Phase 4</button>
-          <button class="btn btn-ghost btn-sm" onclick="setPhase(5)">Phase 5</button>
-        </div>
-        <div class="status-bar">
-          <span class="status-dot" id="statusDot"></span>
-          <span id="statusText">Connecting...</span>
-        </div>
+      <div class="control-row">
+        <label>Phase</label>
+        <button class="btn btn-ghost btn-sm" onclick="pushPhase(1)">1</button>
+        <button class="btn btn-ghost btn-sm" onclick="pushPhase(2)">2</button>
+        <button class="btn btn-ghost btn-sm" onclick="pushPhase(3)">3</button>
+        <button class="btn btn-ghost btn-sm" onclick="pushPhase(4)">4</button>
+        <button class="btn btn-ghost btn-sm" onclick="pushPhase(5)">5</button>
+      </div>
+
+      <div class="status-bar">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText">Connecting...</span>
       </div>
     </div>
 
@@ -128,10 +138,10 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let session = { role: 'viewer', label: null, teamId: null };
 let teams = [];
-let timerInterval = null;
-let timerSeconds = 180;
-let timerRunning = false;
-let pollInterval = null;
+let gameState = null;
+let localSeconds = 180;
+let timerTick = null;
+let lastBeepSecond = -1;
 
 async function sha256(text) {
   const buf = new TextEncoder().encode(text);
@@ -174,6 +184,9 @@ function logout() {
   location.reload();
 }
 
+function canControl() { return session.role === 'admin' || session.role === 'facilitator'; }
+function isAdmin() { return session.role === 'admin'; }
+
 function enterApp() {
   document.getElementById('loginScreen').classList.add('hidden');
   document.getElementById('mainApp').classList.remove('hidden');
@@ -182,25 +195,21 @@ function enterApp() {
   badge.textContent = session.role.charAt(0).toUpperCase() + session.role.slice(1) + (session.label && session.role !== 'viewer' ? ' — ' + session.label : '');
   badge.className = 'role-badge role-' + session.role;
 
-  if (session.role === 'admin') {
+  if (isAdmin()) {
     document.getElementById('adminPanel').classList.remove('hidden');
     loadAccessList();
   }
-
-  if (session.role === 'viewer' || session.role === 'team') {
-    document.querySelectorAll('.timer-controls .btn, .phase-controls .btn').forEach(b => b.disabled = true);
-    document.getElementById('minutesInput').disabled = true;
+  if (canControl()) {
+    document.getElementById('controlPanel').classList.remove('hidden');
   }
 
-  loadAll();
-  pollInterval = setInterval(loadAll, 3000);
+  loadTeams();
+  loadState();
+  subscribeRealtime();
+  startLocalTick();
 }
 
-function canScore() { return session.role === 'admin' || session.role === 'facilitator'; }
-function canTimer() { return session.role === 'admin' || session.role === 'facilitator'; }
-function isAdmin() { return session.role === 'admin'; }
-
-async function loadAll() {
+async function loadTeams() {
   const { data, error } = await sb.from('game_teams').select('*').eq('active', true).order('score', { ascending: false });
   if (error) { setStatus(false); return; }
   setStatus(true);
@@ -209,15 +218,98 @@ async function loadAll() {
   renderLeaderboard();
 }
 
+async function loadState() {
+  const { data, error } = await sb.from('game_state').select('*').eq('id', 1).single();
+  if (error) return;
+  gameState = data;
+  applyState();
+}
+
+function applyState() {
+  if (!gameState) return;
+
+  const phaseLabels = {
+    1: 'Phase 1: Role Assignment',
+    2: 'Phase 2: The Dilemma Deck',
+    3: 'Phase 3: Negotiation',
+    4: 'Phase 4: The Blame Poll',
+    5: 'Phase 5: Final Debrief'
+  };
+
+  document.getElementById('livePhase').textContent = phaseLabels[gameState.current_phase] || 'Phase ' + gameState.current_phase;
+  document.getElementById('liveDilemma').textContent = gameState.current_dilemma || '';
+  document.getElementById('liveInstructions').textContent = gameState.instructions || '';
+
+  if (gameState.timer_running && gameState.timer_started_at) {
+    const startedAt = new Date(gameState.timer_started_at).getTime();
+    const now = Date.now();
+    const elapsed = Math.floor((now - startedAt) / 1000);
+    localSeconds = Math.max(0, gameState.timer_seconds - elapsed);
+    document.getElementById('liveStatus').textContent = 'Running';
+  } else {
+    localSeconds = gameState.timer_seconds || 0;
+    document.getElementById('liveStatus').textContent = 'Paused';
+  }
+
+  updateLiveTimer();
+}
+
+function startLocalTick() {
+  if (timerTick) clearInterval(timerTick);
+  timerTick = setInterval(() => {
+    if (gameState && gameState.timer_running && localSeconds > 0) {
+      localSeconds--;
+      updateLiveTimer();
+      if (localSeconds === 0) {
+        playBeep();
+        document.getElementById('liveStatus').textContent = 'Time Up';
+      }
+    } else {
+      updateLiveTimer();
+    }
+  }, 1000);
+}
+
+function updateLiveTimer() {
+  const el = document.getElementById('liveTimerDisplay');
+  const m = Math.floor(localSeconds / 60).toString().padStart(2, '0');
+  const s = (localSeconds % 60).toString().padStart(2, '0');
+  el.textContent = m + ':' + s;
+  el.classList.remove('warning', 'danger');
+  if (localSeconds <= 10 && localSeconds > 0) el.classList.add('danger');
+  else if (localSeconds <= 30 && localSeconds > 0) el.classList.add('warning');
+}
+
+function playBeep() {
+  if (lastBeepSecond === localSeconds) return;
+  lastBeepSecond = localSeconds;
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 1.2);
+    osc.start();
+    osc.stop(ctx.currentTime + 1.2);
+  } catch (e) {}
+}
+
 function setStatus(ok) {
-  document.getElementById('statusDot').classList.toggle('error', !ok);
-  document.getElementById('statusText').textContent = ok ? 'Connected' : 'Disconnected';
+  const dot = document.getElementById('statusDot');
+  const text = document.getElementById('statusText');
+  if (!dot || !text) return;
+  dot.classList.toggle('error', !ok);
+  text.textContent = ok ? 'Connected' : 'Disconnected';
 }
 
 function renderScoreControls() {
   const container = document.getElementById('scoreControls');
+  if (!container) return;
   if (!teams.length) { container.innerHTML = '<p class="empty">No teams yet.</p>'; return; }
-  const disabled = canScore() ? '' : 'disabled';
+  const disabled = canControl() ? '' : 'disabled';
   container.innerHTML = teams.map(t => {
     const isMyTeam = session.teamId === t.id;
     return `
@@ -238,6 +330,7 @@ function renderScoreControls() {
 
 function renderLeaderboard() {
   const container = document.getElementById('leaderboard');
+  if (!container) return;
   if (!teams.length) { container.innerHTML = '<p class="empty">No teams yet.</p>'; return; }
   const sorted = [...teams].sort((a, b) => b.score - a.score);
   container.innerHTML = sorted.map((t, i) => {
@@ -255,12 +348,11 @@ function renderLeaderboard() {
 }
 
 async function changeScore(teamId, delta) {
-  if (!canScore()) return;
+  if (!canControl()) return;
   const team = teams.find(t => t.id === teamId);
   if (!team) return;
   const newScore = team.score + delta;
-  const { error } = await sb.from('game_teams').update({ score: newScore, updated_at: new Date().toISOString() }).eq('id', teamId);
-  if (error) { showToast('Error updating score'); return; }
+  await sb.from('game_teams').update({ score: newScore, updated_at: new Date().toISOString() }).eq('id', teamId);
   await sb.from('game_scores').insert([{ team_id: teamId, delta: delta, reason: 'Manual update' }]);
   team.score = newScore;
   renderScoreControls();
@@ -268,13 +360,82 @@ async function changeScore(teamId, delta) {
   showToast((delta > 0 ? '+' : '') + delta + ' → ' + team.name);
 }
 
+async function pushTimerSet() {
+  if (!canControl()) return;
+  const mins = parseInt(document.getElementById('minutesInput').value) || 3;
+  const secs = mins * 60;
+  await sb.from('game_state').update({
+    timer_seconds: secs,
+    timer_running: false,
+    timer_started_at: null,
+    updated_at: new Date().toISOString()
+  }).eq('id', 1);
+  showToast('Timer set to ' + mins + ' min');
+}
+
+async function pushTimerStart() {
+  if (!canControl()) return;
+  await sb.from('game_state').update({
+    timer_running: true,
+    timer_started_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  }).eq('id', 1);
+  showToast('Timer started');
+}
+
+async function pushTimerPause() {
+  if (!canControl()) return;
+  const remaining = localSeconds;
+  await sb.from('game_state').update({
+    timer_running: false,
+    timer_seconds: remaining,
+    timer_started_at: null,
+    updated_at: new Date().toISOString()
+  }).eq('id', 1);
+  showToast('Timer paused');
+}
+
+async function pushTimerReset() {
+  if (!canControl()) return;
+  const mins = parseInt(document.getElementById('minutesInput').value) || 3;
+  await sb.from('game_state').update({
+    timer_running: false,
+    timer_started_at: null,
+    timer_seconds: mins * 60,
+    updated_at: new Date().toISOString()
+  }).eq('id', 1);
+  showToast('Timer reset');
+}
+
+async function pushPhase(n) {
+  if (!canControl()) return;
+  await sb.from('game_state').update({ current_phase: n, updated_at: new Date().toISOString() }).eq('id', 1);
+  showToast('Phase ' + n);
+}
+
+async function pushContent() {
+  if (!canControl()) return;
+  const dilemma = document.getElementById('pushDilemma').value.trim();
+  const instructions = document.getElementById('pushInstructions').value.trim();
+  await sb.from('game_state').update({
+    current_dilemma: dilemma || null,
+    instructions: instructions || null,
+    updated_at: new Date().toISOString()
+  }).eq('id', 1);
+  showToast('Live content pushed');
+}
+
+function clearPush() {
+  document.getElementById('pushDilemma').value = '';
+  document.getElementById('pushInstructions').value = '';
+}
+
 async function resetAllScores() {
   if (!isAdmin()) return;
   if (!confirm('Reset all scores to 0?')) return;
   for (const t of teams) await sb.from('game_teams').update({ score: 0 }).eq('id', t.id);
-  await sb.from('game_scores').delete().neq('id', 0);
   showToast('All scores reset');
-  loadAll();
+  loadTeams();
 }
 
 async function createTeam() {
@@ -282,12 +443,12 @@ async function createTeam() {
   const name = document.getElementById('newTeamName').value.trim();
   const code = document.getElementById('newTeamCode').value.trim();
   if (!name || !code) { showToast('Name and code required'); return; }
-  const { error } = await sb.from('game_teams').insert([{ name: name, team_code: code, score: 0, active: true }]);
+  const { error } = await sb.from('game_teams').insert([{ name, team_code: code, score: 0, active: true }]);
   if (error) { showToast('Error: ' + error.message); return; }
   document.getElementById('newTeamName').value = '';
   document.getElementById('newTeamCode').value = '';
   showToast('Team created');
-  loadAll();
+  loadTeams();
 }
 
 async function deleteTeam(teamId) {
@@ -297,7 +458,7 @@ async function deleteTeam(teamId) {
   if (!confirm('Delete team "' + team.name + '"?')) return;
   await sb.from('game_teams').delete().eq('id', teamId);
   showToast('Team deleted');
-  loadAll();
+  loadTeams();
 }
 
 async function createFacilitator() {
@@ -306,7 +467,7 @@ async function createFacilitator() {
   const label = document.getElementById('newFacLabel').value.trim() || 'Facilitator';
   if (!code) { showToast('Code required'); return; }
   const hash = await sha256(code);
-  const { error } = await sb.from('game_access').insert([{ role: 'facilitator', code_hash: hash, label: label, active: true }]);
+  const { error } = await sb.from('game_access').insert([{ role: 'facilitator', code_hash: hash, label, active: true }]);
   if (error) { showToast('Error: ' + error.message); return; }
   document.getElementById('newFacCode').value = '';
   document.getElementById('newFacLabel').value = '';
@@ -317,7 +478,7 @@ async function createFacilitator() {
 async function loadAccessList() {
   const { data } = await sb.from('game_access').select('*').order('created_at', { ascending: false });
   const container = document.getElementById('accessList');
-  if (!data || !data.length) { container.innerHTML = ''; return; }
+  if (!container || !data || !data.length) return;
   container.innerHTML = '<h3>Access Codes</h3>' + data.map(a => `
     <div class="access-row">
       <span class="access-role">${a.role}</span>
@@ -341,81 +502,19 @@ async function deleteAccess(id) {
   loadAccessList();
 }
 
-function formatTime(s) {
-  const m = Math.floor(s / 60).toString().padStart(2, '0');
-  const sec = (s % 60).toString().padStart(2, '0');
-  return m + ':' + sec;
-}
+function subscribeRealtime() {
+  sb.channel('game-state')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'game_state' }, (payload) => {
+      gameState = payload.new;
+      applyState();
+    })
+    .subscribe();
 
-function updateTimerDisplay() {
-  const el = document.getElementById('timerDisplay');
-  el.textContent = formatTime(timerSeconds);
-  el.classList.remove('warning', 'danger');
-  if (timerSeconds <= 10) el.classList.add('danger');
-  else if (timerSeconds <= 30) el.classList.add('warning');
-}
-
-function setTimer() {
-  if (!canTimer()) return;
-  const mins = parseInt(document.getElementById('minutesInput').value) || 3;
-  timerSeconds = mins * 60;
-  updateTimerDisplay();
-}
-
-function quickTimer(mins) {
-  if (!canTimer()) return;
-  document.getElementById('minutesInput').value = mins;
-  setTimer();
-}
-
-function startTimer() {
-  if (!canTimer() || timerRunning) return;
-  timerRunning = true;
-  timerInterval = setInterval(() => {
-    if (timerSeconds > 0) { timerSeconds--; updateTimerDisplay(); }
-    else { clearInterval(timerInterval); timerRunning = false; showToast('Time is up!'); playBeep(); }
-  }, 1000);
-}
-
-function pauseTimer() {
-  if (!canTimer()) return;
-  clearInterval(timerInterval);
-  timerRunning = false;
-}
-
-function resetTimer() {
-  if (!canTimer()) return;
-  clearInterval(timerInterval);
-  timerRunning = false;
-  setTimer();
-}
-
-function playBeep() {
-  try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.frequency.value = 880;
-    gain.gain.setValueAtTime(0.3, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 1);
-    osc.start();
-    osc.stop(ctx.currentTime + 1);
-  } catch (e) {}
-}
-
-function setPhase(n) {
-  if (!canTimer()) return;
-  const phases = {
-    1: 'Phase 1: Role Assignment',
-    2: 'Phase 2: The Dilemma Deck',
-    3: 'Phase 3: Negotiation',
-    4: 'Phase 4: The Blame Poll',
-    5: 'Phase 5: Final Debrief'
-  };
-  document.getElementById('phaseValue').textContent = phases[n];
-  showToast(phases[n]);
+  sb.channel('game-teams')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'game_teams' }, () => {
+      loadTeams();
+    })
+    .subscribe();
 }
 
 function showToast(msg) {
@@ -428,13 +527,6 @@ function showToast(msg) {
 
 document.getElementById('codeInput').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') attemptLogin();
-});
-
-document.addEventListener('keydown', (e) => {
-  if (e.target.tagName === 'INPUT') return;
-  if (!canTimer()) return;
-  if (e.code === 'Space') { e.preventDefault(); timerRunning ? pauseTimer() : startTimer(); }
-  if (e.key === 'r' || e.key === 'R') resetTimer();
 });
 
 const saved = sessionStorage.getItem('ir_session');
