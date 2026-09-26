@@ -154,7 +154,9 @@ let teams = [];
 let gameState = null;
 let localSeconds = 180;
 let timerTick = null;
+let syncTick = null;
 let lastBeepSecond = -1;
+let lastRunningState = false;
 
 function parseTimestamp(ts) {
   if (!ts) return NaN;
@@ -255,6 +257,7 @@ async function loadState() {
   }
 
   gameState = data;
+  lastRunningState = data.timer_running;
   hideDebug();
   applyState();
 }
@@ -275,47 +278,61 @@ function applyState() {
 
 function startLocalTick() {
   if (timerTick) clearInterval(timerTick);
-  timerTick = setInterval(async () => {
-    try {
-      const { data, error } = await sb.from('game_state').select('*').eq('id', 1).maybeSingle();
-      if (error) {
-        setStatus(false, 'timer refresh failed: ' + error.message);
-      } else if (data) {
-        gameState = data;
-        setStatus(true);
-        hideDebug();
-      }
-    } catch (e) {
-      setStatus(false, 'network error: ' + e.message);
-    }
+  timerTick = setInterval(renderTimerFromState, 250);
 
-    if (gameState && gameState.timer_running && gameState.timer_started_at) {
-      const startedAt = parseTimestamp(gameState.timer_started_at);
-      if (isNaN(startedAt)) {
-        showDebug('Invalid timer_started_at: ' + gameState.timer_started_at);
-      } else {
-        const now = Date.now();
-        const elapsed = Math.floor((now - startedAt) / 1000);
-        const remaining = Math.max(0, (gameState.timer_seconds || 0) - elapsed);
-        localSeconds = remaining;
-        updateLiveTimer();
-        if (remaining === 0) {
-          document.getElementById('liveStatus').textContent = 'Time Up';
-          if (lastBeepSecond !== 0) {
-            lastBeepSecond = 0;
-            playBeep();
-          }
-        } else {
-          document.getElementById('liveStatus').textContent = 'Running';
-        }
+  if (syncTick) clearInterval(syncTick);
+  syncFromServer();
+  syncTick = setInterval(syncFromServer, 1000);
+}
+
+async function syncFromServer() {
+  try {
+    const { data, error } = await sb.from('game_state').select('*').eq('id', 1).maybeSingle();
+    if (error) {
+      setStatus(false, 'sync failed: ' + error.message);
+      return;
+    }
+    if (data) {
+      if (data.timer_running && !lastRunningState) {
+        lastBeepSecond = -1;
+      }
+      lastRunningState = data.timer_running;
+      gameState = data;
+      setStatus(true);
+      hideDebug();
+      applyState();
+    }
+  } catch (e) {
+    setStatus(false, 'network error: ' + e.message);
+  }
+}
+
+function renderTimerFromState() {
+  if (gameState && gameState.timer_running && gameState.timer_started_at) {
+    const startedAt = parseTimestamp(gameState.timer_started_at);
+    if (isNaN(startedAt)) {
+      showDebug('Invalid timer_started_at: ' + gameState.timer_started_at);
+      return;
+    }
+    const now = Date.now();
+    const elapsed = Math.floor((now - startedAt) / 1000);
+    const remaining = Math.max(0, (gameState.timer_seconds || 0) - elapsed);
+    localSeconds = remaining;
+    updateLiveTimer();
+    if (remaining === 0) {
+      document.getElementById('liveStatus').textContent = 'Time Up';
+      if (lastBeepSecond !== 0) {
+        lastBeepSecond = 0;
+        playBeep();
       }
     } else {
-      localSeconds = gameState && gameState.timer_seconds ? gameState.timer_seconds : 180;
-      updateLiveTimer();
-      document.getElementById('liveStatus').textContent = 'Paused';
+      document.getElementById('liveStatus').textContent = 'Running';
     }
-    applyState();
-  }, 1000);
+  } else {
+    localSeconds = gameState && gameState.timer_seconds ? gameState.timer_seconds : 180;
+    updateLiveTimer();
+    document.getElementById('liveStatus').textContent = 'Paused';
+  }
 }
 
 function updateLiveTimer() {
@@ -437,8 +454,9 @@ async function pushTimerStart() {
   if (error) { showToast('Error: ' + error.message); return; }
 
   gameState = data;
-  localSeconds = secs;
+  lastRunningState = true;
   lastBeepSecond = -1;
+  localSeconds = secs;
   updateLiveTimer();
   document.getElementById('liveStatus').textContent = 'Running';
   showToast('Timer started (' + mins + ' min)');
@@ -458,6 +476,7 @@ async function pushTimerPause() {
   }).eq('id', 1).select().single();
   if (error) { showToast('Error: ' + error.message); return; }
   gameState = data;
+  lastRunningState = false;
   showToast('Timer paused');
 }
 
@@ -473,6 +492,7 @@ async function pushTimerReset() {
   }).eq('id', 1).select().single();
   if (error) { showToast('Error: ' + error.message); return; }
   gameState = data;
+  lastRunningState = false;
   localSeconds = secs;
   lastBeepSecond = -1;
   updateLiveTimer();
